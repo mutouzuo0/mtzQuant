@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mtzQuant 回测监控</title>
+<title>mtzQuant Web 控制台</title>
 <style>
   :root { --bg:#0f1420; --panel:#161d2e; --line:#232c44; --fg:#d7e0f2; --muted:#8b96b0;
           --acc:#4c8dff; --green:#2ecc71; --red:#e74c3c; --yellow:#f1c40f; }
@@ -12,6 +12,10 @@
   header { display:flex; align-items:center; gap:14px; padding:12px 20px; background:var(--panel);
            border-bottom:1px solid var(--line); flex-wrap:wrap; }
   header h1 { font-size:15px; margin:0; }
+  nav { display:flex; gap:6px; flex-wrap:wrap; }
+  nav a { color:var(--muted); text-decoration:none; padding:4px 12px; border-radius:6px; }
+  nav a:hover { background:var(--line); color:var(--fg); }
+  nav a.active { background:var(--acc); color:#fff; }
   .muted { color:var(--muted); }
   #statusBadge { padding:2px 10px; border-radius:10px; font-size:12px; background:#26304a; }
   .s-completed_exact,.s-completed_degraded { background:#0f2e1d; color:var(--green); }
@@ -38,12 +42,31 @@
   #logs { height:150px; overflow:auto; font:11px/1.6 Consolas,monospace; color:var(--muted);
           white-space:pre-wrap; }
   .buy { color:var(--red); } .sell { color:var(--green); }
+  button { padding:5px 14px; border:1px solid var(--line); background:var(--panel); color:var(--fg);
+           border-radius:6px; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.danger { color:var(--red); } button.ok { color:var(--green); }
+  input,select,textarea { background:#0b101d; border:1px solid var(--line); color:var(--fg);
+           border-radius:6px; padding:6px 8px; font:inherit; }
+  .row { display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap; }
+  .page { display:none; padding:12px 20px; }
+  .page.active { display:block; }
+  .tab { display:inline-block; padding:5px 14px; border-radius:6px; cursor:pointer; color:var(--muted); }
+  .tab.active { background:var(--acc); color:#fff; }
   #foot { padding:10px 20px; color:var(--muted); font-size:12px; }
+  .pill { background:var(--line); padding:2px 8px; border-radius:8px; font-size:11px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>mtzQuant 回测监控</h1>
+  <h1>mtzQuant</h1>
+  <nav>
+    <a href="#/monitor" data-nav="monitor">监控</a>
+    <a href="#/new" data-nav="new">新建回测</a>
+    <a href="#/history" data-nav="history">历史</a>
+    <a href="#/data" data-nav="data">数据下载</a>
+    <a href="#/help" data-nav="help">帮助</a>
+  </nav>
   <span id="taskName" class="muted">—</span>
   <span id="runId" class="muted">—</span>
   <span id="statusBadge">connecting…</span>
@@ -53,8 +76,16 @@
   </div>
 </header>
 
+<!-- ==================== 监控页（W0 最小版扩展: 只扩不重写） ==================== -->
+<div id="page-monitor" class="page active">
 <main>
   <div>
+    <div class="row">
+      <span>run_id: <input id="monRunId" placeholder="留空 = 全部运行中会话" style="width:260px"></span>
+      <button id="btnControlPause" class="">暂停</button>
+      <button id="btnControlResume" class="ok">恢复</button>
+      <button id="btnControlStop" class="danger">终止</button>
+    </div>
     <div class="metrics">
       <div class="metric"><div class="l">总收益</div><div class="v" id="m_total">—</div></div>
       <div class="metric"><div class="l">年化</div><div class="v" id="m_annual">—</div></div>
@@ -77,17 +108,93 @@
     </div>
   </div>
 </main>
+</div>
+
+<!-- ==================== 新建回测页 ==================== -->
+<div id="page-new" class="page">
+  <div class="card" style="max-width:760px">
+    <h2>新建回测（提交后强制子进程执行, D1）</h2>
+    <div class="row"><span style="width:90px">任务 JSON</span>
+      <input id="newTask" style="flex:1" placeholder="task.json 路径, 如 configs/demo_dual_ma.json"></div>
+    <div class="row">
+      <span style="width:90px">任务内容</span>
+      <textarea id="newTaskJson" rows="10" style="flex:1;font:12px/1.5 Consolas,monospace"></textarea>
+    </div>
+    <div class="row">
+      <button id="btnLoadTask" class="">读取文件</button>
+      <button id="btnSubmit" class="ok">提交回测</button>
+      <span id="newMsg" class="muted"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 历史 / 对比页 ==================== -->
+<div id="page-history" class="page">
+  <div class="row">
+    <button id="btnRefreshRuns">刷新</button>
+    <span class="muted">勾选 ≤6 个 run 对比</span>
+    <button id="btnCompare" class="ok">对比选中</button>
+  </div>
+  <div class="card">
+    <h2>历史回测（backtest_run, 8.3.1）</h2>
+    <table id="runsTable"><thead><tr>
+      <th>☑</th><th>run_id</th><th>任务</th><th>状态</th><th>夏普</th><th>开始</th><th>操作</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+  <div id="compareBox" class="card" style="margin-top:12px;display:none">
+    <h2>指标对照（10.3）</h2>
+    <table id="compareTable"><thead></thead><tbody></tbody></table>
+    <h2>净值对齐</h2>
+    <div id="compareChart" style="height:280px"></div>
+  </div>
+</div>
+
+<!-- ==================== 数据下载页 ==================== -->
+<div id="page-data" class="page">
+  <div class="card" style="max-width:760px">
+    <h2>数据下载（7.6 两步: 检查覆盖 → 确认下载）</h2>
+    <div class="row"><span style="width:90px">代码</span>
+      <input id="dlCodes" placeholder="逗号分隔, 如 510300.SH,510500.SH" style="flex:1"></div>
+    <div class="row"><span style="width:90px">区间</span>
+      <input id="dlStart" placeholder="YYYY-MM-DD" value="2020-01-01">
+      <span>~</span><input id="dlEnd" placeholder="YYYY-MM-DD"></div>
+    <div class="row">
+      <button id="btnCoverage" class="">检查覆盖</button>
+      <button id="btnDownload" class="ok">确认下载</button>
+      <span id="dlMsg" class="muted"></span>
+    </div>
+    <table id="dlTable"><thead><tr><th>代码</th><th>状态</th><th>新增</th><th>区间</th><th>说明</th></tr></thead><tbody></tbody></table>
+  </div>
+</div>
+
+<!-- ==================== 帮助页 ==================== -->
+<div id="page-help" class="page">
+  <div class="card" style="max-width:760px">
+    <h2>帮助</h2>
+    <p class="muted">mtzQuant Web 控制台——本地优先量化回测框架。</p>
+    <ul>
+      <li>监控页: 实时净值/进度/成交; 输入 run_id 订阅指定会话（留空 = 全部）;</li>
+      <li>断线自动按 event_seq 补帧（resume 协议, 6.3/13.5）;</li>
+      <li>新建页: 提交任务 JSON → 子进程隔离执行（D1）;</li>
+      <li>历史页: 多 run 指标对照 + 净值对齐（10.3）;</li>
+      <li>报告: 命令行 <code>mtzquant report &lt;run_id&gt;</code> 生成自包含 report.html。</li>
+    </ul>
+    <p class="muted">认证: 非本机绑定时请开启 server.auth_enabled + secrets server.tokens（13.5）。</p>
+  </div>
+</div>
+
 <div id="foot">回测结束后可用 <code>mtzquant report &lt;run_id&gt;</code> 查看完整报告。</div>
 
 <script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/pages/app.js"></script>
 <script>
 "use strict";
+// ---- 监控页（W0 最小版逻辑保留, 只扩不重写）----
 const $ = id => document.getElementById(id);
 const fmt = v => v==null ? "—" : (typeof v==="number" ? v.toLocaleString("zh-CN",{maximumFractionDigits:2}) : String(v));
 const fmtPct = v => v==null ? "—" : (v*100).toFixed(2)+"%";
 const fmtMoney = v => v==null ? "—" : (v/10000).toFixed(1)+"万";
 
-// ---- 状态 ----
 function setStatus(s){
   const b=$("statusBadge");
   b.textContent = s || "—";
@@ -101,7 +208,6 @@ function setProgress(p){
     ` · ${Math.round((p.percent||0)*100)}% · 已用 ${(p.elapsed_seconds||0).toFixed(1)}s${eta}`;
 }
 
-// ---- 净值曲线（增量 appendData, W0-5）----
 let chart=null, navSeries=[], benchSeries=[], firstDaily=null, days=0;
 const dailyRets=[];
 function ensureChart(){
@@ -129,7 +235,6 @@ function onDailyNav(d){
   const c=ensureChart();
   c.appendData({seriesIndex:0,data:[[t,d.nav]]});
   if(d.benchmark_nav!=null) c.appendData({seriesIndex:1,data:[[t,d.benchmark_nav]]});
-  // 日收益（夏普用）
   if(navSeries.length>1){
     const prev=navSeries[navSeries.length-2][1], cur=navSeries[navSeries.length-1][1];
     dailyRets.push(cur/prev-1);
@@ -158,7 +263,6 @@ function updateMetrics(){
   $("m_sharpe").textContent=sharpe==null?"—":sharpe.toFixed(2);
 }
 
-// ---- 成交表 / 日志 ----
 const FILLS=[];
 function onFill(d){
   FILLS.unshift(d);
@@ -188,28 +292,66 @@ function handle(env){
     case "fill": onFill(d); break;
     case "log": onLog(d); break;
     case "status": setStatus(d.status); break;
-    default: break; // order_event / corp_action / metric 等不渲染（W0 单页裁剪）
+    default: break; // order_event / corp_action / metric / committed 不渲染（单页裁剪）
   }
 }
 
-async function boot(){
-  try{
-    const r=await fetch("/api/runtime");
-    const rt=await r.json();
-    if(rt.run_id){ $("runId").textContent="run: "+rt.run_id; }
-    if(rt.task_name){ $("taskName").textContent=rt.task_name; }
-    if(rt.status!=="idle") setStatus(rt.status);
-  }catch(e){ /* 无 runtime 时静默 */ }
-
-  let ws;
-  try{ ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/api/ws"); }
+// ---- WS 订阅（M4-W3: run_id 过滤 + resume 补帧 + 重连）----
+let ws=null, wsSeq=0, reconnectTimer=null;
+function connectWS(){
+  const runId = $("monRunId").value.trim() || undefined;
+  const params = new URLSearchParams();
+  if(runId) params.set("run_id", runId);
+  if(wsSeq>0) params.set("last_event_seq", String(wsSeq));
+  const proto = location.protocol==="https:"?"wss://":"ws://";
+  try{ ws = new WebSocket(proto+location.host+"/api/ws?"+params.toString()); }
   catch(e){ setStatus("error"); return; }
-  ws.onmessage = ev => { try{ handle(JSON.parse(ev.data)); }catch(e){ /* 忽略坏帧 */ } };
-  ws.onclose = () => { setStatus("closed"); };
+  ws.onmessage = ev => {
+    try{ const env=JSON.parse(ev.data); wsSeq=Math.max(wsSeq, env.event_seq||0); handle(env); }
+    catch(e){ /* 忽略坏帧 */ }
+  };
+  ws.onclose = () => { setStatus("closed"); scheduleReconnect(); };
   ws.onerror = () => { setStatus("error"); };
-  // 兜底重连（W0 简化: 单次; M4 补帧协议归 M4-W3）
 }
-boot();
+function scheduleReconnect(){
+  if(reconnectTimer) return;
+  reconnectTimer = setTimeout(()=>{ reconnectTimer=null; connectWS(); }, 2000);
+}
+
+// ---- 控制按钮（REST 同权, 6.4）----
+async function control(action){
+  const runId = $("monRunId").value.trim();
+  if(!runId){ $("progText").textContent="控制需要指定 run_id"; return; }
+  const r = await fetch(`/api/runs/${runId}/${action}`, {method:"POST"});
+  const j = await r.json().catch(()=>({}));
+  $("progText").textContent = (r.ok?"✔ ":"✘ ")+(j.detail||j.status||r.status);
+}
+
+// ---- 路由（hash）----
+function route(){
+  const h = location.hash || "#/monitor";
+  const page = h.split("?")[0].replace("#/","");
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+  const el = document.getElementById("page-"+(page||"monitor"));
+  if(el) el.classList.add("active");
+  document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("active", a.dataset.nav===page));
+  if(page==="history") window.mtzHistory && mtzHistory.load();
+  if(page==="monitor" && !ws) connectWS();
+}
+window.addEventListener("hashchange", route);
+
+// 监控页初始化
+function initMonitor(){
+  const runFromHash = new URLSearchParams(location.hash.split("?")[1]||"").get("run");
+  if(runFromHash) $("monRunId").value=runFromHash;
+  $("monRunId").addEventListener("change", ()=>{ if(ws){ ws.close(); ws=null; wsSeq=0; navSeries=[]; benchSeries=[]; firstDaily=null; days=0; dailyRets.length=0; } connectWS(); });
+  $("btnControlPause").onclick = ()=>control("pause");
+  $("btnControlResume").onclick = ()=>control("resume");
+  $("btnControlStop").onclick = ()=>control("stop");
+  connectWS();
+}
+initMonitor();
+route();
 </script>
 </body>
 </html>

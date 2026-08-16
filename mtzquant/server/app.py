@@ -103,6 +103,21 @@ def create_app(
             return runtime.info()
         return {"run_id": None, "task_name": None, "status": "idle"}
 
+    @app.get("/api/read-task")
+    async def read_task(path: str = "", dep: None = Depends(_require_any)) -> dict[str, Any]:
+        """读取本地任务 JSON（新建页「读取文件」; 路径相对仓库根或绝对）。"""
+        import os
+
+        p = Path(path)
+        if not p.is_absolute():
+            p = Path(".") / p
+        if not p.is_file() or os.path.abspath(p).startswith(os.path.abspath("data")):
+            raise HTTPException(status_code=404, detail=f"任务文件不可读: {path}")
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=f"任务 JSON 解析失败: {exc}") from exc
+
     @app.post("/api/backtests")
     async def submit_backtest(
         body: dict[str, Any], dep: None = Depends(_require_operator)
@@ -190,6 +205,15 @@ def create_app(
             }
         )
         return {"run_id": run_id, "dir": str(run_dir), "files": files, "report": "report.html"}
+
+    @app.get("/api/runs/{run_id}/navs")
+    async def run_navs(run_id: str, dep: None = Depends(_require_any)) -> list[dict[str, Any]]:
+        """每日净值明细（8.3.4; 报告/监控页全量以 DB 为准, 6.1）。"""
+        from mtzquant.store.models import init_db
+        from mtzquant.store.repo import RunRepo
+
+        repo = RunRepo(init_db(settings.database.url))
+        return repo.get_navs(run_id)
 
     @app.get("/api/runs/{run_id}/compare")
     async def compare(

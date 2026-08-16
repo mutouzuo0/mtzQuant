@@ -94,12 +94,17 @@ class BacktestSessionManager:
 
     def _journal(self, run_id: str, after_seq: int) -> list[dict[str, Any]]:
         """从 run_event_journal 按 seq 回放（W3 resume 补帧; 失败返回空, 不阻断）。"""
+        db = None
         try:
             from mtzquant.store.repo import DetailRepo
 
-            return DetailRepo(init_db(self._db_url)).journal(run_id, after_seq)
+            db = init_db(self._db_url)
+            return DetailRepo(db).journal(run_id, after_seq)
         except Exception:  # noqa: BLE001
             return []
+        finally:
+            if db is not None:
+                db.dispose()
 
     # ------------------------------------------------------------------
     # 提交（Web=强制子进程, D1）
@@ -244,6 +249,7 @@ class BacktestSessionManager:
     # DB（预建 running 行 + 终态兜底）
     # ------------------------------------------------------------------
     def _precreate_run(self, task: TaskConfig, run_id: str) -> None:
+        db = None
         try:
             db = init_db(self._db_url)
             repo = RunRepo(db)
@@ -267,13 +273,21 @@ class BacktestSessionManager:
             )
         except Exception:  # noqa: BLE001 - 预建失败不阻断（worker persist 会建）
             pass
+        finally:
+            # 释放连接池（防 SQLite WAL 锁竞争: worker 子进程随后连接同一库, 12.2）
+            if db is not None:
+                db.dispose()
 
     def _sync_db_status(self, handle: RunHandle) -> None:
+        db = None
         try:
             db = init_db(self._db_url)
             RunRepo(db).update_status(handle.run_id, handle.status, error_log=handle.error or None)
         except Exception:  # noqa: BLE001
             pass
+        finally:
+            if db is not None:
+                db.dispose()
 
     # ------------------------------------------------------------------
     def shutdown(self) -> None:
