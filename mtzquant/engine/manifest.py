@@ -193,6 +193,13 @@ def build_manifest(
         "random_seed": RANDOM_SEED,
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
+    # M3-T3/U1: 扫描上下文（selection_count=该参数共尝试组数）与 OOS 段标记（parent_lineage.split）
+    engine = task.get("engine") or {}
+    if "selection_count" in engine:
+        manifest["selection_count"] = engine["selection_count"]
+    pl = engine.get("parent_lineage") or {}
+    if pl:
+        manifest["parent_lineage"] = pl
     # 指纹 = 剔除运行时刻等非确定性字段（8.8: 同输入 manifest_hash 全等, 供 replay 比对）
     fingerprint = {k: v for k, v in manifest.items() if k != "created_at"}
     manifest_hash = sha256_text(canonical_json(fingerprint))

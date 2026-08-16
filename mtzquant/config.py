@@ -46,6 +46,7 @@ class LocalCsvSettings(BaseModel):
     corporate_actions_dir: str = "corporate_actions/{type}"
     calendar_dir: str = "calendars"
     constituents_dir: str = "index_constituents"
+    fundamentals_dir: str = "fundamentals"  # M3-R2: fundamentals/{table}/{code}.csv
     raw_dir: str = "raw"
     group_by_type: bool = True
     file_pattern: str = "{code}.csv"
@@ -114,10 +115,26 @@ class EngineSettings(BaseModel):
     random_seed: int = 42  # 确定性复现（设计 8.8）
 
 
+class ResearchSettings(BaseModel):
+    """研究层默认（M3 §5）: 因子计算预热窗口 / 摩擦归因近似。"""
+
+    warmup_default: int = 60  # 因子计算最少回看根数（动量/波动窗口, S1）
+    bps_default: float = 10.0  # 向量化回测费用近似（S4, 万分之?）——0.001 = 10bp
+
+
+class OptimizerSettings(BaseModel):
+    """参数扫描默认（M3 §5, 10.4）。"""
+
+    max_workers: int = 4  # BacktestQueue 并行 worker 数（D2）
+    mode_defaults: tuple[str, ...] = ("grid", "random")  # bayesian 预留（2.2）
+
+
 class Settings(BaseModel):
     data: DataSettings = Field(default_factory=DataSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     engine: EngineSettings = Field(default_factory=EngineSettings)
+    research: ResearchSettings = Field(default_factory=ResearchSettings)
+    optimizer: OptimizerSettings = Field(default_factory=OptimizerSettings)
 
 
 # ------------------------------------------------------------------

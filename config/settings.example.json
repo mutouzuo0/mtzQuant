@@ -10,6 +10,7 @@
       "corporate_actions_dir": "corporate_actions/{type}",
       "calendar_dir": "calendars",
       "constituents_dir": "index_constituents",
+      "fundamentals_dir": "fundamentals",
       "raw_dir": "raw",
       "group_by_type": true,
       "file_pattern": "{code}.csv",
@@ -56,5 +57,13 @@
     },
     "max_participation": 0.25,
     "random_seed": 42
+  },
+  "research": {
+    "warmup_default": 60,
+    "bps_default": 10.0
+  },
+  "optimizer": {
+    "max_workers": 4,
+    "mode_defaults": ["grid", "random"]
   }
 }

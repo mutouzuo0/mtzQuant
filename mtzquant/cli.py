@@ -300,6 +300,50 @@ def _print_run_summary(result: Any) -> None:
     console.print(table)
 
 
+def _print_fund_reports(reports: list[Any], *, json_out: bool) -> None:
+    """基本面下载报告输出（M3-R2, 3.13）。"""
+    if json_out:
+        _print_json(
+            [
+                {
+                    "code": r.code,
+                    "table": r.table,
+                    "status": r.status,
+                    "added_rows": r.added_rows,
+                    "merged_rows": r.merged_rows,
+                    "source": r.source,
+                    "reason": r.reason,
+                }
+                for r in reports
+            ]
+        )
+        return
+    table = Table(title="基本面下载报告（3.13）")
+    table.add_column("代码")
+    table.add_column("表")
+    table.add_column("状态")
+    table.add_column("新增行")
+    table.add_column("合并后")
+    table.add_column("来源")
+    table.add_column("说明")
+    mark = {
+        "ok": "[green]ok[/green]",
+        "skipped": "[yellow]skipped[/yellow]",
+        "failed": "[red]failed[/red]",
+    }
+    for r in reports:
+        table.add_row(
+            r.code,
+            r.table,
+            mark.get(r.status, r.status),
+            str(r.added_rows),
+            str(r.merged_rows),
+            r.source,
+            r.reason,
+        )
+    console.print(table)
+
+
 # ============================================================
 # list（DB 读取, 8.3.1）
 # ============================================================
@@ -552,10 +596,24 @@ def fetch(
     import_dir: Annotated[
         str | None, typer.Option("--import", help="导入目录任意 CSV（3.5 嗅探 → 去重合并入库）")
     ] = None,
+    fundamentals: Annotated[
+        str | None,
+        typer.Option(
+            "--fundamentals",
+            help="基本面表: fina_indicator|daily_basic（M3-R2, 3.13 PIT 落盘）",
+        ),
+    ] = None,
+    constituents: Annotated[
+        str | None,
+        typer.Option(
+            "--constituents",
+            help="指数成分快照日期 YYYY-MM-DD（M3-R2, 与 --codes 配合取成分快照）",
+        ),
+    ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="仅覆盖检查（不下载不写盘）")] = False,
     json_out: Annotated[bool, typer.Option("--json", help="机读输出")] = False,
 ) -> None:
-    """下载 K 线/主数据到本地 CSV（3.9 六步管道: 覆盖→增量→归一→去重→原子→缓存失效）。"""
+    """下载 K 线/主数据/基本面/成分快照到本地 CSV（3.9 六步管道 + M3-R2 通道）。"""
     from mtzquant.data.fetcher import DataFetcher
 
     try:
@@ -583,6 +641,63 @@ def fetch(
                 f"[green]✔[/green] 主数据刷新: 新增 {rep.added} / 更新 {rep.updated}"
                 f"（源: {rep.source or '—'}）"
             )
+            return
+        if fundamentals:
+            if not codes or not start or not end:
+                raise typer.BadParameter(
+                    "--fundamentals 需要 --codes/--start/--end（基本面下载区间）"
+                )
+            code_list = [c.strip() for c in codes.split(",") if c.strip()]
+            fund_reports = fetcher.fetch_fundamentals(
+                code_list,
+                fundamentals,
+                date.fromisoformat(start),
+                date.fromisoformat(end),
+                dry_run=dry_run,
+            )
+            _print_fund_reports(fund_reports, json_out=json_out)
+            return
+        if constituents:
+            if not codes:
+                raise typer.BadParameter("--constituents 需要 --codes（指数代码列表）")
+            index_list = [c.strip() for c in codes.split(",") if c.strip()]
+            snap_date = date.fromisoformat(constituents)
+            cons_reports = fetcher.fetch_constituents(index_list, snap_date, dry_run=dry_run)
+            if json_out:
+                _print_json(
+                    [
+                        {
+                            "index_code": cr.index_code,
+                            "snapshot_date": cr.snapshot_date,
+                            "status": cr.status,
+                            "members": cr.members,
+                            "source": cr.source,
+                            "reason": cr.reason,
+                        }
+                        for cr in cons_reports
+                    ]
+                )
+                return
+            table = Table(title=f"成分快照下载（{snap_date}）")
+            table.add_column("指数")
+            table.add_column("状态")
+            table.add_column("成分数")
+            table.add_column("来源")
+            table.add_column("说明")
+            cons_mark = {
+                "ok": "[green]ok[/green]",
+                "skipped": "[yellow]skipped[/yellow]",
+                "failed": "[red]failed[/red]",
+            }
+            for cr in cons_reports:
+                table.add_row(
+                    cr.index_code,
+                    cons_mark.get(cr.status, cr.status),
+                    str(cr.members),
+                    cr.source,
+                    cr.reason,
+                )
+            console.print(table)
             return
         if import_dir:
             reports = fetcher.import_dir(Path(import_dir))
@@ -613,15 +728,15 @@ def fetch(
         _print_json(
             [
                 {
-                    "code": r.code,
-                    "status": r.status,
-                    "added_rows": r.added_rows,
-                    "dedup_removed": r.dedup_removed,
-                    "range": [r.merged_start, r.merged_end],
-                    "source": r.source,
-                    "reason": r.reason,
+                    "code": fr.code,
+                    "status": fr.status,
+                    "added_rows": fr.added_rows,
+                    "dedup_removed": fr.dedup_removed,
+                    "range": [fr.merged_start, fr.merged_end],
+                    "source": fr.source,
+                    "reason": fr.reason,
                 }
-                for r in reports
+                for fr in reports
             ]
         )
         return
@@ -639,15 +754,15 @@ def fetch(
         "dry_run": "[cyan]dry-run[/cyan]",
         "failed": "[red]failed[/red]",
     }
-    for r in reports:
+    for fr in reports:
         table.add_row(
-            r.code,
-            mark.get(r.status, r.status),
-            str(r.added_rows),
-            str(r.dedup_removed),
-            f"{r.merged_start} ~ {r.merged_end}",
-            r.source,
-            r.reason,
+            fr.code,
+            mark.get(fr.status, fr.status),
+            str(fr.added_rows),
+            str(fr.dedup_removed),
+            f"{fr.merged_start} ~ {fr.merged_end}",
+            fr.source,
+            fr.reason,
         )
     console.print(table)
 
@@ -868,6 +983,84 @@ def rerun(
         f"[green]✔[/green] rerun 完成: {result.run_id}（parent={run_id}, "
         f"status={result.bundle.status}）"
     )
+
+
+# ============================================================
+# optimize（M3-T3, 10.4）: 参数扫描 → 批量队列 → Top-N 汇总（谱系/selection_count）
+# ============================================================
+@app.command()
+def optimize(
+    config: Annotated[str | None, typer.Option("-c", "--config", help="基线任务 JSON 路径")] = None,
+    space: Annotated[
+        str, typer.Option("--space", help='参数空间 JSON, 如 {"fast":[5,10],"slow":[20,40]}')
+    ] = "{}",
+    mode: Annotated[str, typer.Option("--mode", help="扫描模式: grid|random")] = "grid",
+    trials: Annotated[
+        int | None, typer.Option("--trials", help="random 模式试次数（缺省=min(直积,32)）")
+    ] = None,
+    parent: Annotated[
+        str | None, typer.Option("--parent", help="基线 run_id（扫描任务谱系指向, 10.3）")
+    ] = None,
+    top: Annotated[int, typer.Option("--top", help="Top-N 汇总条数")] = 5,
+    workers: Annotated[int | None, typer.Option("--workers", help="并行 worker 数")] = None,
+    sensitivity: Annotated[
+        bool, typer.Option("--sensitivity", help="对 Top-1 跑邻域敏感性（5.8.2 门禁）")
+    ] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="机读输出")] = False,
+) -> None:
+    """参数扫描: 直积/随机展开 → subprocess 批量并行 → 指标排序 Top-N（10.4）。
+
+    selection_count（该参数共尝试组数）与 parent_run_id 自动注入各扫描 run（5.8.2/10.3）。
+    """
+    from mtzquant.optimize.orchestrate import run_scan
+    from mtzquant.optimize.queue import BacktestQueue
+
+    try:
+        task = _load_task(config, json_out=json_out)
+        space_dict = json.loads(space) if space else {}
+        if not isinstance(space_dict, dict) or not space_dict:
+            raise typer.BadParameter(
+                '--space 需为 JSON 对象, 如 \'{"fast":[5,10,20],"slow":[40,60]}\''
+            )
+        result = run_scan(
+            json.loads(task.model_dump_json()),
+            space_dict,
+            mode=mode,
+            n_trials=trials,
+            parent=parent,
+            top=top,
+            queue=BacktestQueue(workers=workers or 4),
+        )
+    except (typer.Exit, typer.BadParameter):
+        raise
+    except MtzQuantError as exc:
+        _emit_error(exc, json_out=json_out)
+        return
+    except Exception as exc:  # noqa: BLE001
+        _emit_error(exc, json_out=json_out)
+        return
+
+    if json_out:
+        _print_json(result.to_json())
+        return
+    rt = Table(title=f"参数扫描 Top-{len(result.top)}（共 {result.total} 组, mode={mode}）")
+    rt.add_column("排名")
+    rt.add_column("参数")
+    rt.add_column("run_id")
+    rt.add_column("夏普")
+    for i, row in enumerate(result.top, start=1):
+        rt.add_row(
+            str(i),
+            json.dumps(row["params"], ensure_ascii=False, sort_keys=True),
+            (row["run_id"] or "")[:16],
+            f"{row['sharpe']:.4f}" if row["sharpe"] is not None else "—",
+        )
+    console.print(rt)
+    if result.sensitivity is not None:
+        console.print(
+            f"[dim]邻域敏感性: 峰值超幅 {result.sensitivity.peak_ratio:.4f} / "
+            f"adopted {'✅ 允许' if result.sensitivity.adopted_allowed() else '🚫 拒绝'}[/dim]"
+        )
 
 
 # ============================================================

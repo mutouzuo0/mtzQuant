@@ -161,12 +161,18 @@ def test_provider_with_cache(tmp_path) -> None:  # type: ignore[no-untyped-def]
     assert cache.stats.source_loads == 1  # 经缓存加载
 
 
-def test_to_frame_to_numpy_placeholder(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_to_frame_to_numpy_m3(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """M3-R4 转正: to_frame/to_numpy 批量接口（设计 3.8）——宽表与矩阵直出。"""
     prov = _make_provider(tmp_path)
+    frame = prov.to_frame(["510300.SH"], ["close", "volume"], asof(2024, 1, 2), asof(2024, 1, 8))
+    assert isinstance(frame.columns, pd.MultiIndex)
+    assert list(frame.columns.names) == ["code", "field"]
+    assert len(frame) >= 5  # 多标的日期并集
+    arr = prov.to_numpy(["510300.SH"], ["close"], asof(2024, 1, 2), asof(2024, 1, 8))
+    assert arr.ndim == 3 and arr.shape[1:] == (1, 1)
+    # fields 为空 → 结构化报错
     with pytest.raises(MtzQuantError):
-        prov.to_frame(["510300.SH"], ["close"], asof(2024, 1, 2), asof(2024, 1, 8))
-    with pytest.raises(MtzQuantError):
-        prov.to_numpy(["510300.SH"], ["close"], asof(2024, 1, 2), asof(2024, 1, 8))
+        prov.to_frame(["510300.SH"], [], asof(2024, 1, 2), asof(2024, 1, 8))
 
 
 def test_history_n_must_be_positive(tmp_path) -> None:  # type: ignore[no-untyped-def]

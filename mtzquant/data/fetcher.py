@@ -94,6 +94,31 @@ class MasterReport:
     reason: str = ""
 
 
+@dataclass
+class FundamentalsReport:
+    """单标的基本面下载报告（M3-R2, 3.13）。"""
+
+    code: str
+    table: str = ""
+    status: str = "ok"  # ok | skipped | failed
+    added_rows: int = 0
+    merged_rows: int = 0
+    source: str = ""
+    reason: str = ""
+
+
+@dataclass
+class ConstituentsReport:
+    """单指数成分快照下载报告（M3-R2, 3.13）。"""
+
+    index_code: str
+    snapshot_date: str = ""
+    status: str = "ok"  # ok | skipped | failed
+    members: int = 0
+    source: str = ""
+    reason: str = ""
+
+
 def _is_rate_limited(exc: Exception) -> bool:
     text = f"{type(exc).__name__}: {exc}".lower()
     for kw in ("限流", "frequence", "too many", "429", "rate limit", "每分钟", "被限制"):
@@ -115,6 +140,8 @@ class DataFetcher:
         controller: RateLimitController | None = None,
         retry_policy: RetryPolicy | None = None,
         fetch_fn: Callable[..., pd.DataFrame] | None = None,  # 测试注入（绕过网络）
+        fetch_fund_fn: Callable[..., pd.DataFrame] | None = None,  # 测试注入（基本面, M3-R2）
+        fetch_constituents_fn: Callable[..., pd.DataFrame] | None = None,  # 测试注入（成分, M3-R2）
         now: Callable[[], float] | None = None,
         batch_days: int = 365,
         dedup_keep: str = "latest",
@@ -126,6 +153,8 @@ class DataFetcher:
         self._controller = controller or RateLimitController(now=now)
         self._retry = retry_policy or RetryPolicy(max_retries=3)
         self._fetch_fn = fetch_fn
+        self._fetch_fund_fn = fetch_fund_fn
+        self._fetch_constituents_fn = fetch_constituents_fn
         self._now = now or time_mod.monotonic
         self._batch_days = batch_days
         self._dedup_keep = dedup_keep
@@ -491,6 +520,294 @@ class DataFetcher:
                 )
             )
         return rows
+
+    # ------------------------------------------------------------------
+    # M3-R2 基本面通道（3.13）: 财务最小集 + 每日估值, 落 fundamentals/{table}/{code}.csv
+    # ------------------------------------------------------------------
+    def fundamentals_path(self, table: str, code: str) -> Path:
+        return self._root / "fundamentals" / table / f"{code}.csv"
+
+    def fetch_fundamentals(
+        self,
+        codes: list[str],
+        table: str,
+        start: date,
+        end: date,
+        *,
+        sources: list[str] | None = None,
+        dry_run: bool = False,
+    ) -> list[FundamentalsReport]:
+        """拉取基本面最小集（fina_indicator 主键 code+报告期+公告日, 修订版本行保留）。
+
+        落盘: `data/fundamentals/{table}/{code}.csv`（源原始列, 3.12 raw 精神）;
+        幂等: 已存在行按主键去重（重复公告日/交易日行覆盖, 修订版本行保留）。
+        """
+        from mtzquant.data.drivers.tushare_fundamental import (
+            DAILY_BASIC_COLS,
+            FINA_INDICATOR_COLS,
+        )
+
+        known = {"fina_indicator": FINA_INDICATOR_COLS, "daily_basic": DAILY_BASIC_COLS}
+        if table not in known:
+            raise MtzQuantError(
+                f"未知财务表 {table!r}", stage="fetcher", hint=f"可选: {sorted(known)}"
+            )
+        srcs = list(sources or self._sources)
+        reports: list[FundamentalsReport] = []
+        for code in sorted({normalize_code(c) for c in codes}):
+            reports.append(
+                self._fetch_fund_one(code, table, start, end, known[table], srcs, dry_run=dry_run)
+            )
+        return reports
+
+    def _fetch_fund_one(
+        self,
+        code: str,
+        table: str,
+        start: date,
+        end: date,
+        cols: tuple[str, ...],
+        sources: list[str],
+        *,
+        dry_run: bool,
+    ) -> FundamentalsReport:
+        rep = FundamentalsReport(code=code, table=table)
+        path = self.fundamentals_path(table, code)
+        # 幂等: 请求区间已被本地覆盖 → skipped（按日期列粗判）
+        if not dry_run and path.is_file():
+            local_days = self._fund_local_days(path, table)
+            if local_days and min(local_days) <= start and max(local_days) >= end:
+                rep.status = "skipped"
+                rep.reason = "本地已覆盖请求区间"
+                return rep
+        try:
+            last_err: Exception | None = None
+            df = None
+            used = ""
+            for source in sources:
+                wait = self._controller.wait(source)
+                if wait > 0 and self._now is time_mod.monotonic:
+                    time_mod.sleep(wait)
+                try:
+                    df = self._fetch_fund_once(source, code, table, start, end)
+                    self._controller.record_success(source)
+                    used = source
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_err = exc
+                    self._controller.record_failure(source)
+                    continue
+            if df is None or df.empty:
+                rep.status = "failed" if last_err else "skipped"
+                rep.reason = f"无数据: {last_err}" if last_err else "源返回空"
+                return rep
+            clean = self._clean_fund(df, code, table, cols)
+            merged, added = self._merge_fund(path, clean, table)
+            self._atomic_write(path, merged)
+            rep.added_rows = added
+            rep.merged_rows = len(merged)
+            rep.source = used
+            self._master.upsert(
+                [
+                    InstrumentRow(
+                        code=code,
+                        instrument_type=instrument_type_of(code),
+                        exchange=code.rsplit(".", 1)[-1],
+                    )
+                ]
+            )
+            return rep
+        except MtzQuantError as exc:
+            rep.status = "failed"
+            rep.reason = exc.message
+            return rep
+        except Exception as exc:  # noqa: BLE001
+            rep.status = "failed"
+            rep.reason = f"{type(exc).__name__}: {exc}"
+            return rep
+
+    def _fetch_fund_once(
+        self, source: str, code: str, table: str, start: date, end: date
+    ) -> pd.DataFrame:
+        """单源基本面拉取（测试注入优先, 否则走 tushare_fundamental 驱动）。"""
+        if self._fetch_fund_fn is not None:
+            return self._fetch_fund_fn(code, table, start, end, source=source)
+        from mtzquant.data.drivers.remote import get_fundamental_source
+
+        src = get_fundamental_source(source)
+        if table == "fina_indicator":
+            return src.fetch_fina_indicator(code, start, end)
+        if table == "daily_basic":
+            return src.fetch_daily_basic(code, start, end)
+        raise MtzQuantError(f"未知财务表 {table!r}", stage="fetcher")
+
+    @staticmethod
+    def _clean_fund(df: pd.DataFrame, code: str, table: str, cols: tuple[str, ...]) -> pd.DataFrame:
+        """基本面下载校验: 列齐全/日期可解析/无重复主键; 不可归一则拒绝。"""
+        if df is None or df.empty:
+            return df
+        missing = [c for c in ("ts_code",) + cols[1:] if c not in df.columns]
+        if "ts_code" not in df.columns:
+            raise MtzQuantError(
+                f"基本面下载缺 ts_code 列: {code}/{table}",
+                stage="fetcher",
+                hint="源需返回 ts_code + 日期列（3.13 源格式）",
+            )
+        if missing:
+            raise MtzQuantError(
+                f"基本面下载缺列: {code}/{table}: {missing}",
+                stage="fetcher",
+                hint=f"期望列: {cols}",
+            )
+        date_col = "ann_date" if table == "fina_indicator" else "trade_date"
+        dts = pd.to_datetime(df[date_col], format="%Y%m%d", errors="coerce")
+        if dts.isna().any():
+            raise MtzQuantError(
+                f"基本面下载含不可解析 {date_col}: {code}/{table}",
+                stage="fetcher",
+                hint="源返回了非法日期（3.13）",
+            )
+        key = ["end_date", "ann_date"] if table == "fina_indicator" else ["trade_date"]
+        if df.duplicated(subset=key).any():
+            raise MtzQuantError(
+                f"基本面下载含重复主键 {key}: {code}/{table}, 拒绝写盘",
+                stage="fetcher",
+                hint="单次拉取不应重复（3.9 c）; 修订版本行指不同 ann_date, 不属重复",
+            )
+        return df.sort_values(date_col).reset_index(drop=True)
+
+    def _merge_fund(self, path: Path, new_df: pd.DataFrame, table: str) -> tuple[pd.DataFrame, int]:
+        """旧文件 + 新数据按主键去重合并（修订版本行保留: fina_indicator 主键含 ann_date）。"""
+        if table == "fina_indicator":
+            key = ["ts_code", "end_date", "ann_date"]
+        else:
+            key = ["ts_code", "trade_date"]
+        if not path.is_file():
+            merged = new_df.copy()
+            merged = merged.drop_duplicates(subset=key, keep="last").sort_values(key[-1])
+            return merged, len(merged)  # 无旧文件 → 全部为新增
+        try:
+            old = pd.read_csv(path, dtype=str, keep_default_na=False)
+        except OSError:
+            old = pd.DataFrame()
+        merged = (
+            pd.concat([old, new_df.astype(str)], ignore_index=True)
+            .drop_duplicates(subset=key, keep="last")
+            .sort_values(key[-1])
+            .reset_index(drop=True)
+        )
+        return merged, max(len(merged) - len(old), 0)
+
+    @staticmethod
+    def _fund_local_days(path: Path, table: str) -> set[date]:
+        """本地基本面文件已有日期（幂等粗判; 读取失败 → 空集）。"""
+        try:
+            col = "ann_date" if table == "fina_indicator" else "trade_date"
+            df = pd.read_csv(path, usecols=[col], dtype=str, keep_default_na=False)
+            dts = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce").dropna()
+            return {d.date() for d in dts}
+        except Exception:  # noqa: BLE001
+            return set()
+
+    # ------------------------------------------------------------------
+    # M3-R2 成分快照通道（3.13）: 落 index_constituents/{index}_{date}.csv
+    # ------------------------------------------------------------------
+    def constituents_path(self, index_code: str, snapshot_date: date) -> Path:
+        return self._root / "index_constituents" / f"{index_code}_{snapshot_date:%Y%m%d}.csv"
+
+    def fetch_constituents(
+        self,
+        index_codes: list[str],
+        snapshot_date: date,
+        *,
+        sources: list[str] | None = None,
+        dry_run: bool = False,
+    ) -> list[ConstituentsReport]:
+        """拉取指数成分快照（某交易日成分+权重+入/出日期区间; 幂等: 已存在则 skipped）。"""
+        srcs = list(sources or self._sources)
+        reports: list[ConstituentsReport] = []
+        for index in sorted({normalize_code(c) for c in index_codes}):
+            reports.append(
+                self._fetch_constituents_one(index, snapshot_date, srcs, dry_run=dry_run)
+            )
+        return reports
+
+    def _fetch_constituents_one(
+        self, index: str, snapshot_date: date, sources: list[str], *, dry_run: bool
+    ) -> ConstituentsReport:
+        rep = ConstituentsReport(index_code=index, snapshot_date=snapshot_date.isoformat())
+        path = self.constituents_path(index, snapshot_date)
+        if not dry_run and path.is_file():
+            rep.status = "skipped"
+            rep.reason = "快照已存在"
+            return rep
+        try:
+            last_err: Exception | None = None
+            df = None
+            used = ""
+            for source in sources:
+                wait = self._controller.wait(source)
+                if wait > 0 and self._now is time_mod.monotonic:
+                    time_mod.sleep(wait)
+                try:
+                    df = self._fetch_constituents_once(source, index, snapshot_date)
+                    self._controller.record_success(source)
+                    used = source
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_err = exc
+                    self._controller.record_failure(source)
+                    continue
+            if df is None or df.empty:
+                rep.status = "failed" if last_err else "skipped"
+                rep.reason = f"无数据: {last_err}" if last_err else "源返回空"
+                return rep
+            clean = self._clean_constituents(df, index)
+            self._atomic_write(path, clean)
+            rep.members = len(clean)
+            rep.source = used
+            return rep
+        except MtzQuantError as exc:
+            rep.status = "failed"
+            rep.reason = exc.message
+            return rep
+        except Exception as exc:  # noqa: BLE001
+            rep.status = "failed"
+            rep.reason = f"{type(exc).__name__}: {exc}"
+            return rep
+
+    def _fetch_constituents_once(
+        self, source: str, index: str, snapshot_date: date
+    ) -> pd.DataFrame:
+        if self._fetch_constituents_fn is not None:
+            return self._fetch_constituents_fn(index, snapshot_date, source=source)
+        from mtzquant.data.drivers.remote import get_fundamental_source
+
+        return get_fundamental_source(source).fetch_index_constituents(index, snapshot_date)
+
+    @staticmethod
+    def _clean_constituents(df: pd.DataFrame, index: str) -> pd.DataFrame:
+        """成分快照校验: con_code 列齐全/非空/唯一; 不可归一则拒绝。"""
+        if df is None or df.empty:
+            return df
+        if "con_code" not in df.columns:
+            raise MtzQuantError(
+                f"成分快照缺 con_code 列: {index}",
+                stage="fetcher",
+                hint="期望列: index_code/con_code/in_date/out_date/weight（R2 布局）",
+            )
+        clean = df.copy()
+        clean["con_code"] = clean["con_code"].astype(str).str.strip()
+        clean = clean[clean["con_code"] != ""]
+        if clean.empty:
+            raise MtzQuantError(f"成分快照全空: {index}", stage="fetcher")
+        clean["index_code"] = index
+        for col in ("in_date", "out_date"):
+            if col not in clean.columns:
+                clean[col] = ""
+        if "weight" not in clean.columns:
+            clean["weight"] = float("nan")
+        return clean.drop_duplicates(subset=["con_code"]).reset_index(drop=True)
 
     def import_dir(self, src_dir: Path | str, *, resume: bool = True) -> list[FetchReport]:
         """导入目录任意 CSV（3.5 嗅探 → 归一校验 → 去重合并入库, 3.11）。"""

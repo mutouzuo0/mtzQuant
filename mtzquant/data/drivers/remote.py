@@ -41,6 +41,31 @@ class RemoteKlineSource(Protocol):
         ...
 
 
+@runtime_checkable
+class RemoteFundamentalSource(Protocol):
+    """远程基本面/成分源协议（3.13 PIT 四时间, M3-R1 扩展）。
+
+    实现约定: 返回**源原始列**（ts_code/ann_date/end_date/... 保持 tushare 命名）,
+    落盘前由 DataFetcher 校验（R2）; 三字段 PIT 化由 FundamentalsStore 查询期完成:
+      fina_indicator: event_time=end_date(报告期), published_at=ann_date(披露日)
+      daily_basic:    event_time=trade_date,      published_at=trade_date
+    """
+
+    name: str
+
+    def fetch_fina_indicator(self, code: str, start: date, end: date) -> pd.DataFrame:
+        """拉取财务指标（净利润/营收同比等最小集, 按 ann_date 区间）。"""
+        ...
+
+    def fetch_daily_basic(self, code: str, start: date, end: date) -> pd.DataFrame:
+        """拉取每日估值（pe/pb/市值, 按 trade_date 区间）。"""
+        ...
+
+    def fetch_index_constituents(self, index_code: str, trade_date: date) -> pd.DataFrame:
+        """拉取指数成分快照（某交易日成分 + 权重 + 入/出日期区间, 3.13）。"""
+        ...
+
+
 # 注册表: name → 工厂（延迟 import, 可选依赖 download 组）
 SOURCE_REGISTRY: dict[str, type] = {}
 
@@ -74,3 +99,27 @@ def _register_defaults() -> None:
 
     SOURCE_REGISTRY.setdefault("tushare", TushareSource)
     SOURCE_REGISTRY.setdefault("akshare", AkshareSource)
+
+
+# ---- 基本面/成分源注册表（M3-R1; 惰性注册, 同 kline 源解耦）----
+FUNDAMENTAL_SOURCE_REGISTRY: dict[str, type] = {}
+
+
+def register_fundamental_source(name: str, factory: type) -> None:
+    FUNDAMENTAL_SOURCE_REGISTRY[name] = factory
+
+
+def get_fundamental_source(name: str, **kwargs: object) -> RemoteFundamentalSource:
+    """按名构造基本面源（延迟 import; 未知源结构化报错）。"""
+    from mtzquant.core.errors import MtzQuantError
+
+    if name not in FUNDAMENTAL_SOURCE_REGISTRY:
+        raise MtzQuantError(
+            f"未知基本面源 {name!r}",
+            stage="remote",
+            hint=f"可选: {sorted(FUNDAMENTAL_SOURCE_REGISTRY) or ['tushare']}",
+        )
+    obj = FUNDAMENTAL_SOURCE_REGISTRY[name](**kwargs)
+    if not isinstance(obj, RemoteFundamentalSource):
+        raise MtzQuantError(f"源 {name!r} 未实现 RemoteFundamentalSource 协议", stage="remote")
+    return obj

@@ -250,6 +250,16 @@ class BacktestSession:
             if init is not None:
                 init(self._adapter._ctx)
 
+        # M3-T1 参数注入（扫描任务: task.engine.params 覆盖策略默认 g 值, 4.7 参数族）:
+        # 策略 initialize 先设默认, 此处框架参数覆盖——双均线 fast/slow 等扫描参数生效。
+        params = (task.engine or {}).get("params") or {}
+        if params:
+            g = getattr(self._adapter, "_ctx", None)
+            g = getattr(g, "g", None)
+            if g is not None:
+                for k, v in sorted(params.items()):
+                    g[k] = v
+
         # 公司行为（task.backtest.corp_actions, 3.14）
         self._corp_actions: list[CorporateAction] = [
             self._parse_corp_action(item) for item in task.backtest.corp_actions

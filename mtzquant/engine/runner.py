@@ -34,6 +34,7 @@ from mtzquant.core.errors import MtzQuantError
 from mtzquant.data.cache import DataCache
 from mtzquant.data.calendar import TradeCalendar
 from mtzquant.data.drivers.csv_driver import CsvSourceDriver
+from mtzquant.data.fundamentals import FundamentalsStore
 from mtzquant.data.normalizer import DataNormalizer
 from mtzquant.data.provider import MarketDataProvider
 from mtzquant.engine.engine import UnifiedBacktestEngine
@@ -82,6 +83,7 @@ def build_pipeline(settings: Settings, codes: list[str]) -> Pipeline:
         cache=cache,
         preload_mode=settings.data.cache.preload_mode,
         warmup_bars=settings.data.cache.warmup_bars_default,
+        fundamentals=FundamentalsStore(lcs.root_path),  # M3-R3: 基本面/成分 PIT 读取
     )
     norm = normalize_universe(codes)
     start = datetime.fromisoformat("1970-01-01")
@@ -144,6 +146,9 @@ def run_task(
     task_dict = json.loads(task.model_dump_json())
     if run_id is None:
         run_id = make_run_id(task_dict)
+    # M3-T3: 谱系（扫描/重跑: task.engine.parent_run_id 优先级最高, 否则用显式参数）
+    if parent_run_id is None:
+        parent_run_id = (task_dict.get("engine") or {}).get("parent_run_id")
 
     # ResultStore 事件流（journal-first, 5.6; flush 钩子=明细入库, 8.7）
     result_store = ResultStore(
