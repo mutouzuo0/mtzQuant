@@ -83,6 +83,7 @@ class BacktestRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_log: Mapped[str | None] = mapped_column(Text)
+    eliminated_reason: Mapped[str | None] = mapped_column(Text)  # M3-U3 淘汰留痕（5.8.2）
     mtzquant_version: Mapped[str] = mapped_column(String(32), default="")
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 软删除
 

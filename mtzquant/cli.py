@@ -351,13 +351,18 @@ def _print_fund_reports(reports: list[Any], *, json_out: bool) -> None:
 def list_runs(
     sort: Annotated[str, typer.Option("--sort", help="排序: started_at|sharpe")] = "started_at",
     limit: Annotated[int, typer.Option("--limit", help="条数上限")] = 50,
+    include_eliminated: Annotated[
+        bool, typer.Option("--include-eliminated", help="含被淘汰候选（M3-U3, 5.8.2 留痕）")
+    ] = False,
     json_out: Annotated[bool, typer.Option("--json", help="机读输出")] = False,
 ) -> None:
-    """列出历史回测记录（DB, 排除软删除）。"""
+    """列出历史回测记录（DB, 排除软删除; 默认折叠被淘汰候选）。"""
     try:
         settings = load_settings()
         repo = RunRepo(init_db(settings.database.url))
-        runs = repo.list_runs(sort_by=sort, limit=limit)
+        runs = repo.list_runs(
+            sort_by=sort, limit=limit, include_eliminated=include_eliminated
+        )
     except (typer.Exit, typer.BadParameter):
         raise
     except MtzQuantError as exc:
@@ -384,6 +389,7 @@ def list_runs(
     table.add_column("任务")
     table.add_column("状态")
     table.add_column("夏普")
+    table.add_column("淘汰")
     table.add_column("开始时间")
     for r in runs:
         status_mark = (
@@ -396,6 +402,7 @@ def list_runs(
             r["task_name"],
             status_mark,
             f"{r['sharpe']:.3f}" if r.get("sharpe") is not None else "—",
+            (r.get("eliminated_reason") or "")[:16] or "—",
             _iso(r.get("started_at")),
         )
     console.print(table)
@@ -410,11 +417,15 @@ def report(
     out: Annotated[
         str | None, typer.Option("--out", help="输出路径（默认 results/<run_id>/report.html）")
     ] = None,
+    friction: Annotated[
+        str | None,
+        typer.Option("--friction", help="并入摩擦归因报告路径（friction_report.json, M3-V3）"),
+    ] = None,
     json_out: Annotated[bool, typer.Option("--json", help="机读输出")] = False,
 ) -> None:
-    """生成自包含 report.html（指标卡/语义保真/净值+回撤 SVG/成交表）。"""
+    """生成自包含 report.html（指标卡/语义保真/净值+回撤/成交表/可选摩擦归因章节）。"""
     try:
-        path = render_report(run_id, out_path=out)
+        path = render_report(run_id, out_path=out, friction_path=friction)
     except (typer.Exit, typer.BadParameter):
         raise
     except MtzQuantError as exc:

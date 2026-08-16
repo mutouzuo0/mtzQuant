@@ -116,22 +116,38 @@ class RunRepo:
             s.execute(update(BacktestRun).where(BacktestRun.id == run_id).values(**vals))
             s.commit()
 
+    def eliminate_run(self, run_id: str, reason: str) -> None:
+        """淘汰留痕（5.8.2, M3-U3）: 候选 run 保留 + 淘汰原因（list 默认折叠）。"""
+        if not reason:
+            raise MtzQuantError(
+                f"淘汰原因不能为空: {run_id}", stage="store", hint="5.8.2 淘汰须留痕"
+            )
+        with Session(self.engine, expire_on_commit=False) as s:
+            s.execute(
+                update(BacktestRun).where(BacktestRun.id == run_id).values(eliminated_reason=reason)
+            )
+            s.commit()
+
     def get(self, run_id: str) -> BacktestRun | None:
         with Session(self.engine, expire_on_commit=False) as s:
             return s.get(BacktestRun, run_id)
 
-    def list_runs(self, *, sort_by: str = "started_at", limit: int = 50) -> list[dict[str, Any]]:
-        """列出未软删除的 run（I 阶段 `mtzquant list`, 8.3.1）。"""
+    def list_runs(
+        self, *, sort_by: str = "started_at", limit: int = 50, include_eliminated: bool = False
+    ) -> list[dict[str, Any]]:
+        """列出 run（M3-U3: 默认折叠被淘汰候选, --include-eliminated 显式显示, 5.8.2）。"""
         order = {
             "started_at": BacktestRun.started_at.desc(),
             "sharpe": None,  # 需关联 metrics, 单独处理
         }
+        not_elim = BacktestRun.eliminated_reason.is_(None)
         with Session(self.engine, expire_on_commit=False) as s:
             if sort_by == "sharpe":
                 rows = s.execute(
                     select(BacktestRun, BacktestMetrics.metrics_json)
                     .join(BacktestMetrics, BacktestRun.id == BacktestMetrics.run_id, isouter=True)
                     .where(BacktestRun.deleted_at.is_(None))
+                    .where(not_elim if not include_eliminated else True)  # type: ignore[arg-type]
                     .order_by(BacktestRun.started_at.desc())
                     .limit(limit)
                 ).all()
@@ -146,6 +162,7 @@ class RunRepo:
                 s.execute(
                     select(BacktestRun)
                     .where(BacktestRun.deleted_at.is_(None))
+                    .where(not_elim if not include_eliminated else True)  # type: ignore[arg-type]
                     .order_by(order.get(sort_by, BacktestRun.started_at.desc()))
                     .limit(limit)
                 )
@@ -166,6 +183,7 @@ class RunRepo:
             "finished_at": run.finished_at,
             "mtzquant_version": run.mtzquant_version,
             "error_log": run.error_log,
+            "eliminated_reason": run.eliminated_reason,
         }
 
     def set_manifest(self, run_id: str, manifest_json: str, manifest_hash: str) -> None:

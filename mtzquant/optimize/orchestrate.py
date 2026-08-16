@@ -52,10 +52,16 @@ def run_scan(
     top: int = 5,
     queue: BacktestQueue | None = None,
     metric_of: Callable[[str], float | None] | None = None,
+    vector_rank_fn: Callable[[dict[str, Any]], float] | None = None,
     run_sensitivity: bool = False,
     sensitivity_metric: Callable[[dict[str, Any]], float] | None = None,
 ) -> ScanResult:
-    """执行一次扫描; 返回 Top-N 汇总（含谱系与 selection_count 注入）。"""
+    """执行一次扫描; 返回 Top-N 汇总（含谱系与 selection_count 注入）。
+
+    普查/精算分工（12.1-M3 验收, V-2）: 提供 `vector_rank_fn` 时, 先对**全部**任务用
+    向量化引擎排序（普查, 快）——仅 Top-N 提交事件引擎精算（subprocess 队列）。
+    `vector_rank_fn(task) -> metric`（研究层把 params → 向量化净值/指标, 5.8 分工）。
+    """
     tasks = list(ParamOptimizer().search(base_task, space, mode=mode, n_trials=n_trials))
     total = len(tasks)
     if total == 0:
@@ -68,6 +74,10 @@ def run_scan(
             engine["parent_run_id"] = parent
         task["engine"] = engine
     q = queue or BacktestQueue()
+    if vector_rank_fn is not None:
+        # 普查: 向量化引擎全量排序 → 只精算 Top-N（V-2: grid 100 组只精算 Top5）
+        tasks.sort(key=lambda t: vector_rank_fn(t), reverse=True)
+        tasks = tasks[: max(top, 1)]
     run_ids = q.submit_many(tasks)
     # 指标排序 → Top-N（metric_of 缺省从 DB metrics 读 sharpe）
     rows: list[dict[str, Any]] = []

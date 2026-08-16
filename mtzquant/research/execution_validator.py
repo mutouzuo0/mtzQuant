@@ -113,6 +113,7 @@ class FrictionReport:
             "meta": self.meta,
             "totals": self.totals,
             "periods": [p.__dict__ for p in self.periods],
+            "data_manifest_hash": self.data_manifest_hash,
             "vector_nav": {_dkey(d): float(v) for d, v in self.vector_nav.items()},
             "event_nav": {_dkey(d): float(v) for d, v in self.event_nav.items()},
         }
@@ -210,6 +211,7 @@ class EventDrivenExecutionValidator:
             "n_periods": len(report.periods),
             "event_status": eb.status,
             "degradations": eb.degradations,
+            "run_id": getattr(event_bundle, "run_id", ""),  # 事件 run（report.html 数据源）
         }
 
         # 4) 写 friction_report.{json,md}（D5）

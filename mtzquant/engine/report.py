@@ -40,9 +40,16 @@ _METRICS_VERSION = "8.4-v1"
 
 
 def render_report(
-    run_id: str, *, out_root: Path | str = "results", out_path: Path | str | None = None
+    run_id: str,
+    *,
+    out_root: Path | str = "results",
+    out_path: Path | str | None = None,
+    friction_path: Path | str | None = None,
 ) -> Path:
-    """生成自包含 report.html; 返回输出路径。"""
+    """生成自包含 report.html; 返回输出路径。
+
+    friction_path（M3-V3, D5）: 可选并入双引擎摩擦归因报告（friction_report.json）。
+    """
     run_dir = Path(out_root) / run_id
     if not run_dir.is_dir():
         raise MtzQuantError(
@@ -56,8 +63,9 @@ def render_report(
     fills = _load_fills(run_dir)
     events = _load_events(run_dir)
     task = _load_json(run_dir / "task.json") or {}
+    friction = _load_json(Path(friction_path)) if friction_path else None
 
-    html_text = _render_html(run_id, summary, navs, orders, fills, events, task)
+    html_text = _render_html(run_id, summary, navs, orders, fills, events, task, friction)
     out = Path(out_path) if out_path else run_dir / "report.html"
     out.write_text(html_text, encoding="utf-8")
     return out
@@ -274,6 +282,54 @@ def _participation_bars(part: dict[str, Any]) -> str:
         )
 
     return "".join(_bar(k, v) for k, v in tips)
+
+
+# ------------------------------------------------------------------
+# 摩擦归因报告并入 report.html（M3-V3, D5: friction_report 同源 JSON）
+# ------------------------------------------------------------------
+def _friction_hash(friction: dict[str, Any]) -> str:
+    """摩擦报告数据版本锚点（12 位缩写; 缺失 → —）。"""
+    h = str(friction.get("data_manifest_hash") or "").strip()
+    return html.escape(h[:12]) if h else "—"
+
+
+def _render_friction(friction: dict[str, Any]) -> str:
+    """双引擎摩擦归因章节（5.8/8.4.4）——并入 report.html 新章节。"""
+    totals = friction.get("totals", {})
+    meta = friction.get("meta", {})
+    periods = friction.get("periods", [])
+    rows = ""
+    for p in periods[:100]:
+        rows += (
+            f"<tr><td>{html.escape(str(p.get('period', '')))}</td>"
+            f"<td>{p.get('vector_ret', 0):.4f}</td>"
+            f"<td>{p.get('event_ret', 0):.4f}</td>"
+            f"<td style='color:{'#dc2626' if p.get('diff', 0) < 0 else '#16a34a'}'>"
+            f"{p.get('diff', 0):.4f}</td>"
+            f"<td>{p.get('fee_ret', 0):.6f}</td>"
+            f"<td>{p.get('slippage_ret', 0):.6f}</td>"
+            f"<td>{p.get('capacity_ret', 0):.6f}</td>"
+            f"<td>{p.get('turnover', 0):.4f}</td></tr>"
+        )
+    if not rows:
+        rows = "<tr><td colspan='8' class='dim'>无调仓期（买入持有）</td></tr>"
+    return f"""
+<h2>摩擦归因报告（双引擎, 8.4.4 / D5）</h2>
+<p class="dim">向量化引擎（快, 目标权重级）vs 事件驱动引擎（真撮合）——逐期收益差 = 摩擦成本;
+数据版本锚点: <code>{_friction_hash(friction)}</code> ·
+事件状态: {html.escape(str(meta.get("event_status", "")))}
+</p>
+<table>
+<thead><tr><th>调仓日</th><th>向量收益</th><th>事件收益</th><th>差值</th>
+<th>费用</th><th>滑点</th><th>容量/T+1</th><th>换手</th></tr></thead>
+<tbody>{rows}</tbody>
+</table>
+<p class="dim">合计: 总收益差 {totals.get("total_return_diff", 0):.6f} ·
+费用 {totals.get("fee_cost", 0):.6f} ·
+滑点 {totals.get("slippage_cost", 0):.6f} ·
+容量/T+1 {totals.get("capacity_cost", 0):.6f} ·
+总换手 {totals.get("total_turnover", 0):.6f}</p>
+"""
 
 
 # ------------------------------------------------------------------
@@ -525,6 +581,7 @@ def _render_html(
     fills: list[dict[str, Any]],
     events: list[dict[str, Any]],
     task: dict[str, Any],
+    friction: dict[str, Any] | None = None,
 ) -> str:
     status = summary.get("status", "?")
     degradations = summary.get("degradations", []) or []
@@ -585,6 +642,7 @@ def _render_html(
 
     # 标题标识: 回测执行时间（run_id 毫秒时间戳 → 本地时间; 退回 exported_at / run_id）
     title_label = _run_exec_time(run_id, summary) or run_id
+    friction_section = _render_friction(friction) if friction else ""
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -646,6 +704,8 @@ def _render_html(
 {orders_section}
 
 {capacity}
+
+{friction_section}
 
 <h2>指标口径附注</h2>
 <p class="muted">8.4 公式: 年化=nav^(250/n)-1（ANN=250）; 波动 ddof=1;
