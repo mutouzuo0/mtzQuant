@@ -1,0 +1,40 @@
+{
+  "task_name": "全天候策略_ptrade",
+  "strategy": {
+    "file": "strategies/ptrade/全天候策略_ptrade.py",
+    "type": "ptrade",
+    "entry": "on_bar"
+  },
+  "backtest": {
+    "start": "2020-01-01",
+    "end": "2026-08-16",
+    "initial_capital": 100000,
+    "benchmark": "000300.SH",
+    "frequency": "1d",
+    "initial_positions": {},
+    "strict_schedule": false
+  },
+  "universe": [
+    "510310.SH",
+    "513100.SH",
+    "513500.SH",
+    "510210.SH",
+    "159903.SZ",
+    "159919.SZ",
+    "159901.SZ",
+    "510180.SH",
+    "510050.SH",
+    "511010.SH",
+    "511260.SH",
+    "518880.SH",
+    "160719.SZ",
+    "165513.SZ"
+  ],
+  "fees": {
+    "commission_rate": 0.0003,
+    "min_commission": 5.0,
+    "stamp_tax_rate": 0.0,
+    "transfer_fee_rate": 0.0
+  },
+  "engine": {}
+}

@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 10:20:00
+# @update_time        : 2026/08/16 15:42:00
 # @description : F5/I1 BacktestSession：生产化会话 + 任务配置解析（3.6/5.1）; W0 emit + K4 视图
 
 """BacktestSession（设计 5.1 SessionPort 的生产实现，阶段 I 提炼自 golden DailyDriver）。
@@ -463,7 +463,8 @@ class BacktestSession:
         self._adapter.on_after_trading(None)
         events = self.order_book.expire_day_orders(when=_at(dt, 15, 0))
         for ev in events:
-            self._record_event(ev)
+            # 走公开 record_event: EXPIRE 须释放账户冻结（5.3.4）, 防现金泄漏
+            self.record_event(ev)
             self._mark_degraded(f"{ev.order_id} @{dt.date()}: expired(day) 当日未成交")
 
     def mark_to_market(self, dt: datetime) -> dict[str, Any]:
@@ -606,11 +607,16 @@ class BacktestSession:
         )
 
     def record_event(self, ev: Any) -> None:
-        """订单事件入流水; 终态（fill/expire/cancel）释放账户冻结（5.3.4）。"""
+        """订单事件入流水; 成交/部分成交/过期/撤销释放账户冻结（5.3.4）。
+
+        PARTIAL_FILL 即释放该单全额预留（v1 日线: 部分成交后剩余量为 day 单,
+        当日收盘必过期, 不会再成交——预留全额归还可用, 成交额再扣回, 5.3.4）。
+        """
         self._events.append(ev)
         self._emit("order_event", self._event_payload(ev))
         if ev.event_type in (
             OrderEventType.FILL,
+            OrderEventType.PARTIAL_FILL,
             OrderEventType.EXPIRE,
             OrderEventType.CANCEL,
         ):

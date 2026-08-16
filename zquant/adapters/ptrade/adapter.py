@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 11:00:00
-# @update_time        : 2026/08/16 11:10:00
+# @update_time        : 2026/08/16 15:32:24
 # @description : L4-L7 PTradeAdapter：L0 API 注入 + 设置族 + run_daily 调度 + 注册（4.7）
 
 """PTradeAdapter（设计 4.7 / 附录C）——PTrade 官方策略零改动回测。
@@ -184,21 +184,26 @@ class PTradeAdapter:
         self._emit_event("log", {"kind": "semantic_degradation", "message": note})
 
     def _refresh(self, dt: datetime) -> None:
-        """每 bar 刷新 context（内核字段 + PTrade portfolio 投影 + blotter）。"""
+        """每 bar 刷新 context（内核字段 + PTrade portfolio 投影 + blotter）。
+
+        策略侧 current_dt/blotter.current_dt 暴露为 naive 本地时间（对齐 PTrade 官方
+        语义, 官方 current_dt 为 naive datetime; 内部 PIT 仍走 aware now_fn, 8.8）。
+        """
         account = getattr(self._ctx, "account", None)
         cal = getattr(self._ctx, "calendar", None)
         previous = cal.before(dt.date()) if cal is not None else None
         universe_fn = getattr(self._ctx, "universe_fn", None)
         universe = list(universe_fn()) if universe_fn is not None else []
         pf = uniform_portfolio(account) if account is not None else None
+        naive_dt = dt.replace(tzinfo=None)
         refresh_context(
             self._ctx,
-            current_dt=dt,
+            current_dt=naive_dt,
             previous_date=previous if previous is not None else dt.date(),
             universe=universe,
             portfolio=ptrade_portfolio(pf) if pf is not None else None,
         )
-        self._ctx.blotter.current_dt = dt
+        self._ctx.blotter.current_dt = naive_dt
 
     def _phase(self) -> str:
         phase = getattr(self._ctx, "phase", None)
@@ -245,7 +250,8 @@ class PTradeAdapter:
             raise ZQuantError("数据 API 需要引擎装配（provider 未注入）", stage="adapter:ptrade")
         return DataApiCore(
             provider,
-            current_dt=lambda: getattr(self._ctx, "current_dt", None),
+            # PIT 时点保持 aware（now_fn 动态源, 8.8）; 不用策略侧 naive current_dt
+            current_dt=lambda: _self_now(self._ctx),
             phase=self._phase,
         )
 

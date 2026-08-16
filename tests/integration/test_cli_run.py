@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 06:48:31
+# @update_time        : 2026/08/16 16:15:00
 # @description : T-I01 CLI 端到端：validate → run → list → report（设计 10.1, 退出码 0/1）
 
 """T-I01：CLI 全链路（设计 10.1）。
@@ -9,7 +9,7 @@
 validate  有效任务 exit 0; 非法任务 JSON → 精确字段报错 + exit 1（--json 可解析）
 run       --json 输出 run_id/status; 导出物落盘; DB 入库
 list      --json 可见刚跑出的 run（含 sharpe 排序列）
-report    产出 report.html（含语义保真/净值 SVG/成交表）
+report    产出 report.html（含语义保真/交互净值canvas图/成交分页表）
 replay    未篡改 → identical
 退出码    成功 0 / 结构化错误 1
 """
@@ -84,7 +84,8 @@ def test_ti01_run_list_report(tmp_path, monkeypatch) -> None:  # type: ignore[no
     assert r.exit_code == 0
     html = (run_dir / "report.html").read_text(encoding="utf-8")
     assert "completed_exact" in html
-    assert "<svg" in html
+    assert 'id="nav-chart"' in html  # 交互净值图 canvas
+    assert 'id="orders-body"' in html  # 成交分页表
 
     # report 不存在的 run → exit 1
     r = runner.invoke(app, ["report", "r_does_not_exist", "--json"])

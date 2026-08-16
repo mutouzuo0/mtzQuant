@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 02:00:00
-# @update_time        : 2026/08/16 02:00:00
+# @update_time        : 2026/08/16 15:38:00
 # @description : F1 OpenOrderBook：受理/冻结/eligible 筛选/更新/当日过期（设计 5.3.1/5.3.4）
 
 """OpenOrderBook（设计 5.3.1/5.3.4）——引擎待撮合队列。
@@ -88,10 +88,16 @@ class OpenOrderBook:
         return amount + fee
 
     # ------------------------------------------------------------------
-    def eligible(self, dt: datetime) -> Iterator[Order]:
-        """按当前事件时刻筛出可撮合订单（eligible_fill_at <= dt, 5.3.1）。"""
+    def eligible(self, dt: datetime, code: str | None = None) -> Iterator[Order]:
+        """按当前事件时刻筛出可撮合订单（eligible_fill_at <= dt, 5.3.1）。
+
+        code 非空时仅筛该标的的订单——撮合阶段⑤按标的逐 bar 驱动, 防止
+        多标的池下订单被其他标的的 bar 错误撮合（阶段⑤按 code 过滤, 5.3.2）。
+        """
         for order in list(self._orders.values()):
             if order.status is not OrderStatus.PENDING:
+                continue
+            if code is not None and order.code != code:
                 continue
             if order.eligible_fill_at is None or order.eligible_fill_at <= dt:
                 yield order

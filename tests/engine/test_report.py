@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 06:48:31
-# @description : J report.html 单测：自包含单文件、指标卡/语义保真/净值 SVG/成交表（设计 9.2）
+# @update_time        : 2026/08/16 16:55:00
+# @description : J report.html 单测：自包含单文件/指标卡/交互净值图/成交分页表（9.2）
 
 """report.html 生成测试（9.2; T-I01 依赖的 report 命令内核）。"""
 
@@ -16,7 +16,7 @@ from zquant.engine.runner import run_task
 
 
 def test_report_html_self_contained(tmp_path: Path) -> None:
-    """自包含单文件: 指标卡/语义保真/净值+回撤 SVG/成交表, 无 CDN 依赖。"""
+    """自包含单文件: 指标卡/语义保真/交互净值图(canvas+内嵌JS)/成交分页表, 无外部依赖。"""
     env = make_backtest_env(tmp_path)
     result = run_task(env.task, settings=env.settings, out_root=env.out_root, persist=False)
 
@@ -26,14 +26,24 @@ def test_report_html_self_contained(tmp_path: Path) -> None:
 
     # 指标卡（gross/net 双口径）
     assert "总收益" in html and "夏普" in html and "最大回撤" in html
+    # 标题: mtzQuant 品牌 + 回测执行时间（run_id 毫秒时间戳, 含时分秒）
+    assert "mtzQuant 回测报告 · 20" in html
+    import re as _re
+
+    assert _re.search(r"mtzQuant 回测报告 · \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", html)
     # 语义保真（completed_exact 无降级）
     assert "completed_exact" in html
-    # 净值+回撤内嵌 SVG
-    assert "<svg" in html
-    # 成交明细表（2 笔成交）
-    assert "<table>" in html
-    # 自包含: 无外部脚本/资源引用（SVG 命名空间 xmlns 不算 CDN 依赖）
-    assert "<script" not in html
+    # 交互净值+回撤 canvas（内嵌 JS: hover 数值 / ↑↓ 缩放 / ←→ 平移）
+    assert 'id="nav-chart"' in html
+    assert "NAV_DATA" in html
+    assert "ArrowUp" in html and "ArrowDown" in html
+    # 成交分页表（滚动容器 + 每页 100 条 + 页码直达; 无 order_id 列）
+    assert 'id="orders-body"' in html
+    assert 'id="orders-prev"' in html and 'id="orders-next"' in html
+    assert 'id="orders-pages"' in html  # 页码直达按钮容器
+    assert "table-scroll" in html  # 滚动容器（表体滚动条）
+    assert "<th>order_id</th>" not in html
+    # 自包含: 无外部脚本/资源引用（内嵌 script 允许, SVG 命名空间 xmlns 不算 CDN 依赖）
     assert 'src="http' not in html and 'href="http' not in html
 
 

@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 02:10:00
-# @update_time        : 2026/08/16 09:07:00
+# @update_time        : 2026/08/16 15:38:00
 # @description : F3 UnifiedBacktestEngine：日内十阶段主循环（设计 5.1/6.4）+ W0 事件
 
 """UnifiedBacktestEngine（设计 5.1）——统一回测主循环。
@@ -164,7 +164,8 @@ class UnifiedBacktestEngine:
             if bar is None:
                 continue
             profile = self.session.profile_of(code)
-            outcomes = self.broker.process_orders(self.order_book, bar, profile)
+            # 只撮合本标的订单（多标的池防串号成交, 5.3.2）
+            outcomes = self.broker.process_orders(self.order_book, bar, profile, code=code)
             for oc in outcomes:
                 self._apply_outcome(oc)
 

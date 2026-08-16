@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 02:05:00
-# @update_time        : 2026/08/16 02:05:00
+# @update_time        : 2026/08/16 15:38:00
 # @description : F2 BrokerSim：事件驱动撮合（一字板/容量截断/滑点/费用/部分成交, 设计 5.3.2/5.3.3）
 
 """BrokerSim（设计 5.3.2/5.3.3）——真实撮合内核, 替代阶段 C 的 MockBroker。
@@ -86,11 +86,19 @@ class BrokerSim:
 
     # ------------------------------------------------------------------
     def process_orders(
-        self, order_book: OpenOrderBook, bar: MinimalBar, profile: InstrumentProfile
+        self,
+        order_book: OpenOrderBook,
+        bar: MinimalBar,
+        profile: InstrumentProfile,
+        code: str | None = None,
     ) -> list[MatchOutcome]:
-        """撮合该 bar 下全部可成交订单（顺序=受理顺序, 确定性 8.8）。"""
+        """撮合该 bar 下全部可成交订单（顺序=受理顺序, 确定性 8.8）。
+
+        code 非空时仅撮合该标的的订单（阶段⑤按标的逐 bar 驱动, 5.3.2）——
+        多标的池下订单必须只对自身标的的 bar 撮合, 防串号成交。
+        """
         outcomes: list[MatchOutcome] = []
-        for order in order_book.eligible(bar.dt):
+        for order in order_book.eligible(bar.dt, code=code):
             outcomes.append(self._match(order, bar, profile, order_book))
         return outcomes
 
