@@ -123,3 +123,54 @@ def test_ts05_params_sanitize() -> None:
     assert cleaned["nested"]["safe"] == 1
     assert cleaned["list"][0]["password"] == ""
     assert cleaned["strategy"]["file"] == "s.py"  # 非敏感保留
+
+
+def test_empty_detail_rows_skipped(engine) -> None:  # type: ignore[no-untyped-def]
+    """M4-AA 回归: 空明细列表直接返回（防 SQLAlchemy 空 list 触发「仅默认列」INSERT 违规）。"""
+    detail = DetailRepo(engine)
+    assert detail.insert_orders([]) == 0
+    assert detail.insert_events([]) == 0
+    assert detail.insert_fills([]) == 0
+    assert detail.insert_navs([]) == 0
+    assert detail.insert_journal([]) == 0
+
+
+def test_noop_strategy_run_persists_navs(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """M4-AA 回归: 无订单策略 run 也能完整入库（每日净值落 backtest_daily_nav）。"""
+    from mtzquant.config import DatabaseSettings, Settings
+    from mtzquant.engine.runner import run_task
+    from mtzquant.engine.session import TaskConfig
+    from tests.fixtures.synth import write_etf_csv
+
+    data = tmp_path / "data"
+    write_etf_csv(data, "510300.SH", n=25)
+    strategy = tmp_path / "s.py"
+    strategy.write_text("def initialize(c): pass\ndef on_bar(c, bar): pass\n", encoding="utf-8")
+    task = TaskConfig.model_validate(
+        {
+            "task_name": "noop",
+            "strategy": {"file": str(strategy), "type": "native"},
+            "backtest": {
+                "start": "2020-01-02",
+                "end": "2020-02-10",
+                "initial_capital": 1_000_000,
+                "frequency": "1d",
+            },
+            "universe": ["510300.SH"],
+            "fees": {
+                "commission_rate": 0.0001,
+                "min_commission": 5.0,
+                "stamp_tax_rate": 0.0,
+                "transfer_fee_rate": 0.0,
+            },
+            "engine": {},
+        }
+    )
+    settings = Settings(database=DatabaseSettings(url=f"sqlite:///{tmp_path / 't.db'}"))
+    settings.data.local_csv.root_path = str(data)
+    res = run_task(task, settings=settings, out_root=tmp_path / "out", persist=True)
+    assert res.error_log is None, res.error_log
+    assert len(res.bundle.navs) == 25
+    db = init_db(f"sqlite:///{tmp_path / 't.db'}")
+    with __import__("sqlalchemy").orm.Session(db) as s:
+        assert s.query(BacktestDailyNav).filter_by(run_id=res.run_id).count() == 25

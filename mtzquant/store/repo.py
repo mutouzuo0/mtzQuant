@@ -357,30 +357,41 @@ class RunRepo:
 
 
 class DetailRepo:
-    """明细批量写入（8.7 executemany; 与 WriteBuffer 配合）。"""
+    """明细批量写入（8.7 executemany; 与 WriteBuffer 配合）。
+
+    空列表直接返回（防 SQLAlchemy 空 list 生成「仅默认列」INSERT 触发 NOT NULL 违规）。
+    """
 
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
 
     def insert_orders(self, rows: Sequence[dict[str, Any]]) -> int:
+        if not rows:
+            return 0
         with Session(self.engine, expire_on_commit=False) as s:
             s.execute(insert(Order), [dict(r) for r in rows])
             s.commit()
         return len(rows)
 
     def insert_events(self, rows: Sequence[dict[str, Any]]) -> int:
+        if not rows:
+            return 0
         with Session(self.engine, expire_on_commit=False) as s:
             s.execute(insert(OrderEvent), [dict(r) for r in rows])
             s.commit()
         return len(rows)
 
     def insert_fills(self, rows: Sequence[dict[str, Any]]) -> int:
+        if not rows:
+            return 0
         with Session(self.engine, expire_on_commit=False) as s:
             s.execute(insert(Fill), [dict(r) for r in rows])
             s.commit()
         return len(rows)
 
     def insert_navs(self, rows: Sequence[dict[str, Any]]) -> int:
+        if not rows:
+            return 0
         with Session(self.engine, expire_on_commit=False) as s:
             s.execute(insert(BacktestDailyNav), [dict(r) for r in rows])
             s.commit()

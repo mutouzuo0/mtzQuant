@@ -11,7 +11,14 @@
 
 ## 状态
 
-`M0+M1 开发中`（语义规格 + 可信日线内核）。路线图：M0 规格 → M1 日线内核 → M2 平台适配 → M3 向量化研究 → M4 Web 实时可视 → M5 分钟级/实盘。
+`M0-M4 已完成`（可信日线内核 + 平台适配 + 向量化研究 + Web 实时可视）。路线图：M5 分钟级/实盘。
+
+## 里程碑
+
+- **M1** 可信日线内核：事件驱动撮合 / PIT 时点 / 确定性重放 / CLI / 报告
+- **M2** 平台适配：聚宽/PTrade 原生策略零改动回测（黄金用例）+ 完整 DataFetcher
+- **M3** 向量化研究：因子引擎 / 股票池 / 组合构造 / 目标权重交接 / 摩擦归因 / 参数扫描 + 防过拟合套件
+- **M4** Web 实时可视：`mtzquant serve` 多页面 SPA + WS 事件流（断线补帧）+ 报告 + 数据体检 + 远程访问
 
 ## 安装
 
@@ -30,6 +37,20 @@ mtzquant config
 ```
 
 > 📖 **完整使用说明见 [`docs/使用说明.md`](docs/使用说明.md)**：怎么运行、怎么准备数据、怎么用 AI。
+
+## 常用命令
+
+```bash
+mtzquant run -c configs/demo_dual_ma.json              # 执行回测
+mtzquant report <run_id>                                # 生成自包含 report.html（--open 浏览器）
+mtzquant list / compare / lineage / diff / rerun        # 历史与谱系
+mtzquant optimize -c task.json --space '{"fast":[5,10,20],"slow":[40,60]}' --top 5   # 参数扫描
+mtzquant fetch --codes 510300.SH --start 2020-01-01 --end 2025-12-31   # 数据下载
+mtzquant fetch --fundamentals fina_indicator --codes 600000.SH ...      # 基本面（PIT）
+mtzquant health                                          # 数据体检（DuckDB 全库扫描）
+mtzquant serve                                           # Web 控制台（监控/新建/历史/扫描/数据）
+mtzquant remote --provider tailscale                     # 远程访问配套（tailnet 手机可看）
+```
 
 ## 开发
 
