@@ -14,7 +14,6 @@ config/settings.json
 results/
 .cache/
 mtzquant.db*
-zquant.db*
 *.sqlite3
 *.parquet
 *.duckdb
