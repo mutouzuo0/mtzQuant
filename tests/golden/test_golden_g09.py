@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from zquant.core.errors import ZQuantError
+from mtzquant.core.errors import MtzQuantError
 
 from .conftest import flat_series
 from .daily import DailyDriver
@@ -46,7 +46,7 @@ def tri_driver() -> DailyDriver:
 def test_g09_universe_gate_before_add(tri_driver) -> None:
     """C 未进 universe 前查询 → 报错；A/B 正常。"""
     driver = tri_driver
-    with pytest.raises(ZQuantError, match="不在动态 universe"):
+    with pytest.raises(MtzQuantError, match="不在动态 universe"):
         driver.history(C, 5)
     assert len(driver.history(A, 5)) == 5
 

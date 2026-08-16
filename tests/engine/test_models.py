@@ -13,15 +13,15 @@ from datetime import datetime as dt
 
 import pytest
 
-from zquant.core.errors import ZQuantError
-from zquant.engine.instrument import etf_profile, stock_profile
-from zquant.engine.models.bar import MinimalBar
-from zquant.engine.models.fee import FeeBreakdown, FeeModel
-from zquant.engine.models.fill_price import FillModel, PriceBasis
-from zquant.engine.models.latency import LatencyModel
-from zquant.engine.models.liquidity import LiquidityBasis, LiquidityModel
-from zquant.engine.models.slippage import SlippageModel
-from zquant.engine.orders import OrderDirection
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.engine.instrument import etf_profile, stock_profile
+from mtzquant.engine.models.bar import MinimalBar
+from mtzquant.engine.models.fee import FeeBreakdown, FeeModel
+from mtzquant.engine.models.fill_price import FillModel, PriceBasis
+from mtzquant.engine.models.latency import LatencyModel
+from mtzquant.engine.models.liquidity import LiquidityBasis, LiquidityModel
+from mtzquant.engine.models.slippage import SlippageModel
+from mtzquant.engine.orders import OrderDirection
 
 STOCK = stock_profile("600000.SH")
 ETF = etf_profile("510300.SH")
@@ -89,9 +89,9 @@ def test_fee_breakdown_sums_correctly() -> None:
 
 def test_fee_rejects_invalid_inputs() -> None:
     model = FeeModel()
-    with pytest.raises(ZQuantError, match="费用计算输入非法"):
+    with pytest.raises(MtzQuantError, match="费用计算输入非法"):
         model.compute(qty=-1.0, price=10.0, profile=STOCK, side=OrderDirection.BUY)
-    with pytest.raises(ZQuantError, match="费用计算输入非法"):
+    with pytest.raises(MtzQuantError, match="费用计算输入非法"):
         model.compute(qty=100.0, price=0.0, profile=STOCK, side=OrderDirection.BUY)
 
 
@@ -121,9 +121,9 @@ def test_slippage_buy_up_sell_down() -> None:
 
 
 def test_slippage_validation() -> None:
-    with pytest.raises(ZQuantError, match="滑点参数不能为负"):
+    with pytest.raises(MtzQuantError, match="滑点参数不能为负"):
         SlippageModel(ratio=-0.1)
-    with pytest.raises(ZQuantError, match="成交基准价必须为正"):
+    with pytest.raises(MtzQuantError, match="成交基准价必须为正"):
         SlippageModel().apply(0.0, OrderDirection.BUY)
 
 
@@ -151,11 +151,11 @@ def test_liquidity_stress_and_derived() -> None:
 
 
 def test_liquidity_validation() -> None:
-    with pytest.raises(ZQuantError, match="max_participation 必须在"):
+    with pytest.raises(MtzQuantError, match="max_participation 必须在"):
         LiquidityModel(max_participation=0.0)
-    with pytest.raises(ZQuantError, match="max_participation 必须在"):
+    with pytest.raises(MtzQuantError, match="max_participation 必须在"):
         LiquidityModel(max_participation=1.5)
-    with pytest.raises(ZQuantError, match="不能为负"):
+    with pytest.raises(MtzQuantError, match="不能为负"):
         LiquidityModel().max_qty(order_qty=-1.0, reference_volume=100.0)
 
 
@@ -170,7 +170,7 @@ def test_latency_default_next_bar() -> None:
 
 
 def test_latency_validation() -> None:
-    with pytest.raises(ZQuantError, match="bars_delay 不能为负"):
+    with pytest.raises(MtzQuantError, match="bars_delay 不能为负"):
         LatencyModel(bars_delay=-1)
 
 

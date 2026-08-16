@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 00:56:00
-# @update_time        : 2026/08/16 00:56:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-D02/T-D02c：三格式嗅探/显式格式/GBK/平铺挂载（3.5/3.12）
 
 """T-D02/T-D02c：三格式嗅探 + 显式 format 跳过 + 未知格式报错列期望列 + GBK + khQuant 平铺挂载。"""
@@ -12,9 +12,9 @@ from datetime import datetime
 
 import pytest
 
-from zquant.core.errors import ZQuantError
-from zquant.core.types import Frequency, InstrumentType
-from zquant.data.drivers.csv_driver import CsvSourceDriver
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.core.types import Frequency, InstrumentType
+from mtzquant.data.drivers.csv_driver import CsvSourceDriver
 
 from .conftest import write_day_csv
 
@@ -28,7 +28,7 @@ def test_sniff_three_formats(golden_dir) -> None:  # type: ignore[no-untyped-def
 
 
 def test_unknown_format_lists_expected_columns() -> None:
-    with pytest.raises(ZQuantError) as exc:
+    with pytest.raises(MtzQuantError) as exc:
         CsvSourceDriver.sniff_format(["foo", "bar", "baz"])
     msg = str(exc.value)
     assert "无法识别" in msg
@@ -80,7 +80,7 @@ def test_gbk_encoding_readable(make_driver, tmp_path) -> None:  # type: ignore[n
 
 def test_missing_file_reports_hint(make_driver, tmp_path) -> None:  # type: ignore[no-untyped-def]
     drv = make_driver(tmp_path)
-    with pytest.raises(ZQuantError) as exc:
+    with pytest.raises(MtzQuantError) as exc:
         drv.load_kline("510300.SH", Frequency.D1, datetime(2024, 1, 2), datetime(2024, 1, 8))
     assert "不存在" in str(exc.value)
 
@@ -88,7 +88,7 @@ def test_missing_file_reports_hint(make_driver, tmp_path) -> None:  # type: igno
 def test_minute_frequency_not_implemented(make_driver, tmp_path) -> None:  # type: ignore[no-untyped-def]
     write_day_csv(tmp_path, "510300.SH", "tushare")
     drv = make_driver(tmp_path)
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         drv.load_kline("510300.SH", Frequency.M1, datetime(2024, 1, 2), datetime(2024, 1, 8))
 
 

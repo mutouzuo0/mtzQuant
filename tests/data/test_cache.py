@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 01:12:00
-# @update_time        : 2026/08/16 01:16:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-D05：两级缓存 命中/失效/adjust 入键/clean（设计 3.7）
 
 """T-D05：两级缓存（设计 3.7）。
@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from zquant.core.types import AdjustMode, Frequency
-from zquant.data.cache import DataCache, cache_key
-from zquant.data.drivers.csv_driver import CsvSourceDriver
-from zquant.data.normalizer import DataNormalizer
+from mtzquant.core.types import AdjustMode, Frequency
+from mtzquant.data.cache import DataCache, cache_key
+from mtzquant.data.drivers.csv_driver import CsvSourceDriver
+from mtzquant.data.normalizer import DataNormalizer
 
 from .conftest import write_day_csv
 

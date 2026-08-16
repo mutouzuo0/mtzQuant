@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from zquant.engine.orders import OrderDirection, OrderStatus
+from mtzquant.engine.orders import OrderDirection, OrderStatus
 
 from .conftest import make_bars
 from .daily import DailyDriver

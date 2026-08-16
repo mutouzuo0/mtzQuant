@@ -1,4 +1,4 @@
-# zQuant
+# mtzQuant
 
 本地优先、事件驱动、多策略平台兼容的量化研究与回测框架。
 
@@ -26,7 +26,7 @@ python -m venv .venv
 ```bash
 cp config/settings.example.json config/settings.json   # 本地配置（不入 Git）
 cp config/secrets.example.json   config/secrets.json   # 密钥（不入 Git；tushare token 填这里）
-zquant config
+mtzquant config
 ```
 
 > 📖 **完整使用说明见 [`docs/使用说明.md`](docs/使用说明.md)**：怎么运行、怎么准备数据、怎么用 AI。
@@ -36,15 +36,15 @@ zquant config
 ```bash
 pytest                    # 快速门禁（排除 slow/network 用例）
 pytest -m slow            # 性能预算 / 真实数据用例
-ruff check zquant tests   # lint
-mypy zquant               # 类型检查（宽松档）
+ruff check mtzquant tests   # lint
+mypy mtzquant               # 类型检查（宽松档）
 lint-imports              # 模块依赖契约（适配器不得依赖引擎内部）
 ```
 
 ## 安全纪律
 
-- 密钥只进 `config/secrets.json`（已 gitignore）或 `ZQUANT_*` 环境变量，永不入库；
-- 本地行情数据（`data/`）、回测产物（`results/`）、业务库（`zquant.db`）不入库；
+- 密钥只进 `config/secrets.json`（已 gitignore）或 `MTZQUANT_*` 环境变量，永不入库；
+- 本地行情数据（`data/`）、回测产物（`results/`）、业务库（`mtzquant.db`）不入库；
 - 入库前的任务参数自动脱敏（token/api_key/secret/webhook/password 模式匹配）。
 
 ## License

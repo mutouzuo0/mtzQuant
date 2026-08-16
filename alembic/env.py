@@ -1,12 +1,12 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 03:28:00
-# @update_time        : 2026/08/16 03:28:00
-# @description : Alembic env：绑定 zquant.store.models.Base 元数据（设计 8.3 迁移）
+# @update_time        : 2026/08/16 21:59:08
+# @description : Alembic env：绑定 mtzquant.store.models.Base 元数据（设计 8.3 迁移）
 
-"""Alembic 迁移环境——绑定 zquant.store.models.Base 元数据。
+"""Alembic 迁移环境——绑定 mtzquant.store.models.Base 元数据。
 
-数据库 URL 优先级: 环境变量 ZQUANT_DB_URL > 默认 sqlite:///./zquant.db
+数据库 URL 优先级: 环境变量 MTZQUANT_DB_URL > 默认 sqlite:///./mtzquant.db
 （alembic.ini 的 sqlalchemy.url 作兜底）。
 """
 
@@ -18,13 +18,13 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from zquant.store.models import Base  # noqa: F401  # 导入即注册全部表
+from mtzquant.store.models import Base  # noqa: F401  # 导入即注册全部表
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", os.environ.get("ZQUANT_DB_URL", "sqlite:///./zquant.db"))
+config.set_main_option("sqlalchemy.url", os.environ.get("MTZQUANT_DB_URL", "sqlite:///./mtzquant.db"))
 
 target_metadata = Base.metadata
 

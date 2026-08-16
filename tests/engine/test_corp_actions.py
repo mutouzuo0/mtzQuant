@@ -15,10 +15,10 @@ from datetime import datetime as dt
 
 import pytest
 
-from zquant.core.errors import ZQuantError
-from zquant.engine.account import Account
-from zquant.engine.corp_actions import CorpActionRecord, CorpActionType, CorporateAction
-from zquant.engine.orders import Fill, OrderDirection
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.engine.account import Account
+from mtzquant.engine.corp_actions import CorpActionRecord, CorpActionType, CorporateAction
+from mtzquant.engine.orders import Fill, OrderDirection
 
 SESSION_START = dt(2026, 6, 15, 9, 15)
 
@@ -123,12 +123,12 @@ def test_split_factor_multiples_qty() -> None:
 
 
 def test_no_position_raises_structured_error() -> None:
-    """生效时无持仓：结构化 ZQuantError（确权于 record_date，引擎顺序保证）。"""
+    """生效时无持仓：结构化 MtzQuantError（确权于 record_date，引擎顺序保证）。"""
     acct = _account()
     act = _div(
         ex=date(2026, 6, 15), announce=date(2026, 6, 1), pay=date(2026, 6, 20), per_share=0.5
     )
-    with pytest.raises(ZQuantError, match="无持仓"):
+    with pytest.raises(MtzQuantError, match="无持仓"):
         act.apply_on_ex_date(acct, SESSION_START)
 
 
@@ -147,16 +147,16 @@ def test_pit_visibility_announce_after_as_of() -> None:
 
 def test_three_time_point_order_validation() -> None:
     """三时点约束：announce ≤ ex ≤ pay；缺少关键字段报错。"""
-    with pytest.raises(ZQuantError, match="公告日不能晚于除权日"):
+    with pytest.raises(MtzQuantError, match="公告日不能晚于除权日"):
         _div(ex=date(2026, 6, 15), announce=date(2026, 6, 16), pay=date(2026, 6, 20), per_share=0.5)
-    with pytest.raises(ZQuantError, match="除权日不能晚于到账日"):
+    with pytest.raises(MtzQuantError, match="除权日不能晚于到账日"):
         _div(ex=date(2026, 6, 15), announce=date(2026, 6, 1), pay=date(2026, 6, 10), per_share=0.5)
-    with pytest.raises(ZQuantError, match="缺少 per_share_cash"):
+    with pytest.raises(MtzQuantError, match="缺少 per_share_cash"):
         CorporateAction(
             code="x",
             action_type=CorpActionType.CASH_DIV,
             announce_date=date(2026, 6, 1),
             ex_date=date(2026, 6, 15),
         )
-    with pytest.raises(ZQuantError, match="ratio 必须为正"):
+    with pytest.raises(MtzQuantError, match="ratio 必须为正"):
         _bonus(ex=date(2026, 6, 15), announce=date(2026, 6, 1), ratio=0.0)

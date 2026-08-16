@@ -20,7 +20,7 @@ delist_date=第 40 日即最后交易日）。初始持仓 A=10,000 股、C=10,0
 
 from __future__ import annotations
 
-from zquant.engine.orders import OrderDirection, OrderStatus
+from mtzquant.engine.orders import OrderDirection, OrderStatus
 
 from .conftest import make_bars
 from .daily import DailyDriver

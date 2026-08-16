@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 15:40:00
-# @update_time        : 2026/08/16 15:40:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-C04 CLI：fetch（dry-run/import/幂等）+ sql 只读守卫（设计 10.1, 退出码 0/1）
 
 """T-C04：CLI fetch + sql 端到端（设计 10.1/3.9/3.10）。
@@ -18,8 +18,8 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from zquant.cli import app
-from zquant.config import Settings
+from mtzquant.cli import app
+from mtzquant.config import Settings
 
 runner = CliRunner()
 
@@ -44,7 +44,7 @@ def test_tc04_sql_select_and_write_guard(tmp_path, monkeypatch) -> None:  # type
     _kline_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
     _kline_path(tmp_path).write_text(CSV_HEADER + ROW, encoding="utf-8")
     settings_path = _write_env(tmp_path)
-    monkeypatch.setenv("ZQUANT_SETTINGS", str(settings_path))
+    monkeypatch.setenv("MTZQUANT_SETTINGS", str(settings_path))
     monkeypatch.chdir(tmp_path)
 
     r = runner.invoke(
@@ -58,12 +58,12 @@ def test_tc04_sql_select_and_write_guard(tmp_path, monkeypatch) -> None:  # type
         r = runner.invoke(app, ["sql", bad, "--json"])
         assert r.exit_code == 1, f"应拒绝写面语句: {bad}"
         payload = json.loads(r.output)
-        assert payload["error"]["type"] == "ZQuantError"
+        assert payload["error"]["type"] == "MtzQuantError"
 
 
 def test_tc04_fetch_dry_run_and_import(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     settings_path = _write_env(tmp_path)
-    monkeypatch.setenv("ZQUANT_SETTINGS", str(settings_path))
+    monkeypatch.setenv("MTZQUANT_SETTINGS", str(settings_path))
     monkeypatch.chdir(tmp_path)
 
     # dry-run: 仅覆盖检查, 不下载不写盘

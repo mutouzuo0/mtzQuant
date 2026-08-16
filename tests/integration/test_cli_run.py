@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 16:15:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-I01 CLI 端到端：validate → run → list → report（设计 10.1, 退出码 0/1）
 
 """T-I01：CLI 全链路（设计 10.1）。
@@ -21,14 +21,14 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from mtzquant.cli import app
 from tests.fixtures.backtest_env import make_backtest_env
-from zquant.cli import app
 
 runner = CliRunner()
 
 
 def _write_env(tmp_path: Path):
-    """落盘 settings.json（ZQUANT_SETTINGS）+ task.json, chdir 到 tmp。"""
+    """落盘 settings.json（MTZQUANT_SETTINGS）+ task.json, chdir 到 tmp。"""
     env = make_backtest_env(tmp_path)
     settings_path = tmp_path / "settings.json"
     settings_path.write_text(env.settings.model_dump_json(), encoding="utf-8")
@@ -39,7 +39,7 @@ def _write_env(tmp_path: Path):
 
 def test_ti01_validate_ok_and_bad(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _, settings_path, task_path = _write_env(tmp_path)
-    monkeypatch.setenv("ZQUANT_SETTINGS", str(settings_path))
+    monkeypatch.setenv("MTZQUANT_SETTINGS", str(settings_path))
     monkeypatch.chdir(tmp_path)
 
     r = runner.invoke(app, ["validate", "-c", str(task_path)])
@@ -57,7 +57,7 @@ def test_ti01_validate_ok_and_bad(tmp_path, monkeypatch) -> None:  # type: ignor
 
 def test_ti01_run_list_report(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _, settings_path, task_path = _write_env(tmp_path)
-    monkeypatch.setenv("ZQUANT_SETTINGS", str(settings_path))
+    monkeypatch.setenv("MTZQUANT_SETTINGS", str(settings_path))
     monkeypatch.chdir(tmp_path)
 
     # run（--json 机读）
@@ -94,7 +94,7 @@ def test_ti01_run_list_report(tmp_path, monkeypatch) -> None:  # type: ignore[no
 
 def test_ti01_replay_identical(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _, settings_path, task_path = _write_env(tmp_path)
-    monkeypatch.setenv("ZQUANT_SETTINGS", str(settings_path))
+    monkeypatch.setenv("MTZQUANT_SETTINGS", str(settings_path))
     monkeypatch.chdir(tmp_path)
 
     r = runner.invoke(app, ["run", "-c", str(task_path), "--json"])

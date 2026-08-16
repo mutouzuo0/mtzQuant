@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 12:12:00
-# @update_time        : 2026/08/16 12:12:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : L8 平台版黄金桥接：ptrade 策略脚本 → DailyDriver（D3: 数据/oracle 复用）
 
 """PTrade 平台版黄金桥接（M2-L8, 计划 D3 纪律）。
@@ -22,10 +22,10 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
-from zquant.adapters.ptrade.adapter import PTradeAdapter
-from zquant.adapters.ptrade.objects import make_bar_data, ptrade_symbol
-from zquant.core.codes import normalize_code
-from zquant.engine.orders import OrderDirection, OrderRequest, OrderStyle
+from mtzquant.adapters.ptrade.adapter import PTradeAdapter
+from mtzquant.adapters.ptrade.objects import make_bar_data, ptrade_symbol
+from mtzquant.core.codes import normalize_code
+from mtzquant.engine.orders import OrderDirection, OrderRequest, OrderStyle
 
 
 class _DriverGateway:

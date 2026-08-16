@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 09:20:00
-# @update_time        : 2026/08/16 09:20:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-W01a..d：W0 最小可视版——app 装配/WS 信封一致+多客户端/桥接 fan-out/页面覆盖
 """T-W01（M2-W0 Web 最小可视版）——fastapi TestClient + 真实 BacktestRuntime。
 
@@ -18,10 +18,10 @@ import json
 
 from fastapi.testclient import TestClient
 
+from mtzquant.server.app import _STATIC_DIR, create_app
+from mtzquant.server.run_local import BacktestRuntime
+from mtzquant.server.ws import ENVELOPE_KEYS, envelope
 from tests.fixtures.backtest_env import make_backtest_env
-from zquant.server.app import _STATIC_DIR, create_app
-from zquant.server.run_local import BacktestRuntime
-from zquant.server.ws import ENVELOPE_KEYS, envelope
 
 
 def _read_all(ws: TestClient, n: int) -> list[dict]:
@@ -133,4 +133,4 @@ def test_page_event_handlers() -> None:
         assert f'case "{t}"' in html, f"页面缺 {t} 消费分支"
     assert "appendData" in html  # 净值增量绘制
     assert "new WebSocket" in html  # WS 订阅入口
-    assert "zquant report" in html  # 终态提示
+    assert "mtzquant report" in html  # 终态提示

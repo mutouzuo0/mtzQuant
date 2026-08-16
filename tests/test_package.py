@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/15 21:33:45
-# @update_time        : 2026/08/16 06:48:31
+# @update_time        : 2026/08/16 21:59:08
 # @description : 阶段 A 冒烟测试：包可安装、配置加载/脱敏正确、CLI 入口可用
 
 """阶段 A 冒烟测试：包可安装、配置加载/脱敏正确、CLI 入口可用。
@@ -16,9 +16,9 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from zquant import METRICS_VERSION, __version__
-from zquant.cli import app
-from zquant.config import (
+from mtzquant import METRICS_VERSION, __version__
+from mtzquant.cli import app
+from mtzquant.config import (
     get_tushare_token,
     load_secrets,
     load_settings,
@@ -67,7 +67,7 @@ def test_tushare_token_env_overrides_file(monkeypatch, tmp_path: Path) -> None:
     path.write_text(json.dumps({"tushare": {"token": "file-token"}}), encoding="utf-8")
     secrets = load_secrets(path)
     assert get_tushare_token(secrets) == "file-token"
-    monkeypatch.setenv("ZQUANT_TUSHARE_TOKEN", "env-token")
+    monkeypatch.setenv("MTZQUANT_TUSHARE_TOKEN", "env-token")
     assert get_tushare_token(secrets) == "env-token"
 
 
@@ -110,12 +110,12 @@ def test_cli_run_missing_config_fails_gracefully(tmp_path: Path) -> None:
     result = runner.invoke(app, ["run", "-c", str(tmp_path / "missing.json"), "--json"])
     assert result.exit_code == 1
     payload = json.loads(result.output)
-    assert payload["error"]["type"] == "ZQuantError"
+    assert payload["error"]["type"] == "MtzQuantError"
 
 
 def test_cli_config_check_with_missing_files(monkeypatch, tmp_path: Path) -> None:
     """本地配置缺失时 config check 仍应正常完成（降级提示而非崩溃）。"""
-    import zquant.cli as cli_mod
+    import mtzquant.cli as cli_mod
 
     monkeypatch.setattr(cli_mod, "DEFAULT_SETTINGS_PATH", tmp_path / "settings.json")
     monkeypatch.setattr(cli_mod, "DEFAULT_SECRETS_PATH", tmp_path / "secrets.json")

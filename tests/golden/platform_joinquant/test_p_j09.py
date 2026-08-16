@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 14:15:00
-# @update_time        : 2026/08/16 14:15:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : g09/g10 平台版（聚宽）：动态 universe 切换 + 调度点可见性
 
 """g09/g10 平台版（聚宽, D3）。
@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import pytest
 
+from mtzquant.core.errors import MtzQuantError
 from tests.golden.conftest import flat_series  # noqa: F401
 from tests.golden.daily import DailyDriver
 from tests.golden.framework import MockBroker
-from zquant.core.errors import ZQuantError
 
 from .bridge import run_joinquant_golden
 
@@ -61,7 +61,7 @@ def handle_data(context, data):
 def test_g09_jq_universe_switch_and_query(tri_driver) -> None:
     """day30 切池 → day31 起 C 可查（31 根, 与 native 同口径）。"""
     # 未进池前查询 → 报错（universe gate）
-    with pytest.raises(ZQuantError, match="不在动态 universe"):
+    with pytest.raises(MtzQuantError, match="不在动态 universe"):
         tri_driver.history(C, 5)
 
     import json as _json

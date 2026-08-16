@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from zquant.core.codes import exchange_of, normalize_code
-from zquant.core.errors import InvalidCodeError
+from mtzquant.core.codes import exchange_of, normalize_code
+from mtzquant.core.errors import InvalidCodeError
 
 # (输入, 期望归一结果) —— 覆盖设计 3.4 归一表的全部来源写法
 CASES: list[tuple[str, str]] = [

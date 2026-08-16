@@ -12,8 +12,8 @@ from datetime import datetime as dt
 
 import pytest
 
-from zquant.core.errors import ZQuantError
-from zquant.engine.orders import (
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.engine.orders import (
     TERMINAL_STATUSES,
     TRANSITION_TABLE,
     Fill,
@@ -63,7 +63,7 @@ def test_order_creation_defaults() -> None:
 
 def test_order_rejects_non_positive_qty() -> None:
     for bad in (0.0, -100.0, 1.0 - 100.0):
-        with pytest.raises(ZQuantError, match="必须为正"):
+        with pytest.raises(MtzQuantError, match="必须为正"):
             _order(bad)
 
 
@@ -143,7 +143,7 @@ def test_terminal_states_reject_any_event() -> None:
             o.filled_qty = 100.0
             o.remaining_qty = 0.0
             before = (o.status, o.filled_qty, o.remaining_qty)
-            with pytest.raises(ZQuantError, match="终态"):
+            with pytest.raises(MtzQuantError, match="终态"):
                 transition_order(o, event, event_time=T5, qty=1.0, price=3.0)
             assert (o.status, o.filled_qty, o.remaining_qty) == before
     assert TERMINAL_STATUSES == frozenset(terminal)
@@ -160,7 +160,7 @@ def test_illegal_non_terminal_transition_rejected() -> None:
     for status, event in illegal:
         o = _order()
         o.status = status
-        with pytest.raises(ZQuantError, match="非法状态迁移"):
+        with pytest.raises(MtzQuantError, match="非法状态迁移"):
             transition_order(o, event, event_time=T1, qty=0.0)
         assert o.status is status  # 订单未被篡改
 
@@ -169,7 +169,7 @@ def test_fill_must_consume_exact_remaining() -> None:
     """FILL 事件必须恰好填满剩余；差一分也不许（撮合层用 PARTIAL_FILL 表达不足量）。"""
     for wrong in (50.0, 0.0, 150.0):
         o = _order(qty=100.0)
-        with pytest.raises(ZQuantError):
+        with pytest.raises(MtzQuantError):
             transition_order(o, OrderEventType.FILL, event_time=T1, qty=wrong, price=3.0)
         assert o.filled_qty == 0.0 and o.remaining_qty == 100.0
 
@@ -178,14 +178,14 @@ def test_partial_fill_qty_bounds() -> None:
     """PARTIAL_FILL 数量必须严格处于 (0, remaining_qty) 开区间。"""
     for bad in (0.0, -10.0, 100.0, 200.0):
         o = _order(qty=100.0)
-        with pytest.raises(ZQuantError):
+        with pytest.raises(MtzQuantError):
             transition_order(o, OrderEventType.PARTIAL_FILL, event_time=T1, qty=bad, price=3.0)
 
 
 def test_fill_price_must_be_positive() -> None:
     for price in (None, 0.0, -1.0):
         o = _order()
-        with pytest.raises(ZQuantError, match="成交价必须为正"):
+        with pytest.raises(MtzQuantError, match="成交价必须为正"):
             transition_order(o, OrderEventType.FILL, event_time=T1, qty=100.0, price=price)
 
 

@@ -3,13 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "zquant"
+name = "mtzquant"
 version = "0.1.0"
-description = "zQuant: local-first, event-driven quantitative backtesting framework (JoinQuant/PTrade compatible, CSV-based)"
+description = "mtzQuant: local-first, event-driven quantitative backtesting framework (JoinQuant/PTrade compatible, CSV-based)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
-authors = [{ name = "zQuant" }]
+authors = [{ name = "mtzQuant" }]
 keywords = ["quant", "backtest", "joinquant", "ptrade", "csv"]
 dependencies = [
     "pandas>=2.0",
@@ -44,10 +44,10 @@ download = [
 ]
 
 [project.scripts]
-zquant = "zquant.cli:app"
+mtzquant = "mtzquant.cli:app"
 
 [tool.setuptools.packages.find]
-include = ["zquant*"]
+include = ["mtzquant*"]
 
 # ============================================================
 # pytest
@@ -86,7 +86,7 @@ select = [
 ignore = ["UP009"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["zquant"]
+known-first-party = ["mtzquant"]
 
 # ============================================================
 # mypy (宽松档)
@@ -104,26 +104,26 @@ no_implicit_optional = true
 #   数据层不得反向依赖引擎层
 # ============================================================
 [tool.importlinter]
-root_packages = ["zquant"]
+root_packages = ["mtzquant"]
 
 [[tool.importlinter.contracts]]
 name = "Adapters must not import engine internals (broker/account/metrics)"
 type = "forbidden"
-source_modules = ["zquant.adapters"]
+source_modules = ["mtzquant.adapters"]
 forbidden_modules = [
-    "zquant.engine.broker",
-    "zquant.engine.account",
-    "zquant.engine.metrics",
+    "mtzquant.engine.broker",
+    "mtzquant.engine.account",
+    "mtzquant.engine.metrics",
 ]
 
 [[tool.importlinter.contracts]]
 name = "Data layer must not import engine"
 type = "forbidden"
-source_modules = ["zquant.data"]
-forbidden_modules = ["zquant.engine"]
+source_modules = ["mtzquant.data"]
+forbidden_modules = ["mtzquant.engine"]
 
 [[tool.importlinter.contracts]]
 name = "Research/ML must not import server"
 type = "forbidden"
-source_modules = ["zquant.research", "zquant.ml"]
-forbidden_modules = ["zquant.server"]
+source_modules = ["mtzquant.research", "mtzquant.ml"]
+forbidden_modules = ["mtzquant.server"]

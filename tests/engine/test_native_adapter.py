@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 02:55:00
-# @update_time        : 2026/08/16 02:55:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-E09：NativeAdapter 注入用例 + AdapterRegistry 注册/detect（设计 4.2/4.3/4.5）
 
 """T-E09：NativeAdapter 注入用例（initialize/on_bar/下单族归一）与 AdapterRegistry。"""
@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import pytest
 
-from zquant.adapters.base import AdapterRegistry, create_adapter
-from zquant.adapters.native import NativeAdapter
-from zquant.core.errors import ZQuantError
-from zquant.engine.orders import OrderRequest, OrderStyle
+from mtzquant.adapters.base import AdapterRegistry, create_adapter
+from mtzquant.adapters.native import NativeAdapter
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.engine.orders import OrderRequest, OrderStyle
 
 STRATEGY = """
 # coding:utf-8
@@ -42,7 +42,7 @@ def test_native_adapter_load_and_inject(tmp_path) -> None:  # type: ignore[no-un
 def test_native_adapter_missing_entry_raises(tmp_path) -> None:  # type: ignore[no-untyped-def]
     p = tmp_path / "bad.py"
     p.write_text("x = 1\n", encoding="utf-8")
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         NativeAdapter().load(p)
 
 
@@ -52,7 +52,7 @@ def test_adapter_registry_register_create() -> None:
     inst = reg.create("native")
     assert isinstance(inst, NativeAdapter)
     assert inst.platform == "native"
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         reg.create("nope")
 
 

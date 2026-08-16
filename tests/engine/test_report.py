@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 16:55:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : J report.html 单测：自包含单文件/指标卡/交互净值图/成交分页表（9.2）
 
 """report.html 生成测试（9.2; T-I01 依赖的 report 命令内核）。"""
@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mtzquant.engine.report import render_report
+from mtzquant.engine.runner import run_task
 from tests.fixtures.backtest_env import make_backtest_env
-from zquant.engine.report import render_report
-from zquant.engine.runner import run_task
 
 
 def test_report_html_self_contained(tmp_path: Path) -> None:
@@ -70,7 +70,7 @@ def test_report_missing_run_raises(tmp_path: Path) -> None:
     """缺失 run 目录 → 结构化错误（hint 引导先 run）。"""
     import pytest
 
-    from zquant.core.errors import ZQuantError
+    from mtzquant.core.errors import MtzQuantError
 
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         render_report("r_nope", out_root=tmp_path / "results")

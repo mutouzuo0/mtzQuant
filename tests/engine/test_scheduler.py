@@ -10,8 +10,8 @@ strict_schedule 拒绝、run_interval 结构化报错、weekly/monthly 折叠首
 
 from __future__ import annotations
 
-from zquant.core.types import Frequency
-from zquant.engine.scheduler import (
+from mtzquant.core.types import Frequency
+from mtzquant.engine.scheduler import (
     DegradationKind,
     ScheduleResolution,
     SessionTiming,

@@ -101,7 +101,7 @@ def test_g11_receivable_unavailable_at_ex() -> None:
     """ex 日应收 10,000 但 available 不变（未到账不可用）。"""
     _ = _adr()
     # 语义在 account 层已由 credit_dividend/settle_dividend 保证，此处做隔离确认：
-    from zquant.engine.account import Account
+    from mtzquant.engine.account import Account
 
     acct = Account(run_id="x", initial_cash=1_000_000.0, available_cash=1_000_000.0)
     acct.credit_dividend(10_000.0)

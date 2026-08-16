@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from zquant.engine.orders import OrderDirection, OrderStatus
+from mtzquant.engine.orders import OrderDirection, OrderStatus
 
 from .conftest import flat_series
 from .daily import DailyDriver

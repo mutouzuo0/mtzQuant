@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 03:42:00
-# @update_time        : 2026/08/16 03:42:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-S06：导出物与 DB 同源一致（逐行比对）+ summary.json schema（设计 9.1）
 
 """T-S06：RunStore.export 导出物与输入 Bundle 逐行一致 + summary.json 可解析。"""
@@ -12,7 +12,7 @@ import json
 
 import pandas as pd
 
-from zquant.engine.export import ExportBundle, RunStore
+from mtzquant.engine.export import ExportBundle, RunStore
 
 
 def _bundle() -> ExportBundle:

@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 00:52:00
-# @update_time        : 2026/08/16 00:52:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : tests/data 共享 fixture：golden 目录/驱动工厂/ETF 档案
 
 """tests/data 共享 fixture（T-D01..T-D07 共用）。"""
@@ -14,9 +14,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from zquant.core.types import InstrumentType
-from zquant.data.drivers.csv_driver import CsvSourceDriver
-from zquant.engine.instrument import etf_profile
+from mtzquant.core.types import InstrumentType
+from mtzquant.data.drivers.csv_driver import CsvSourceDriver
+from mtzquant.engine.instrument import etf_profile
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden_files"
 FILL_TOL = 1e-10

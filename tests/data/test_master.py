@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 01:22:00
-# @update_time        : 2026/08/16 01:22:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-D07：主数据 读写/upsert/快照（设计 3.11）
 
 """T-D07：master/instruments.csv 读写、upsert 语义、快照留档、脏值清洗（设计 3.11）。"""
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from zquant.data.master import InstrumentRow, MasterStore, clean_field
+from mtzquant.data.master import InstrumentRow, MasterStore, clean_field
 
 
 def _store(tmp_path: Path) -> MasterStore:  # type: ignore[no-untyped-def]

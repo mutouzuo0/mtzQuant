@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 01:10:00
-# @update_time        : 2026/08/16 01:10:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-D04：交易日历（设计 3.12-④）
 
 """T-D04：交易日历（设计 3.12-④）——文件/推导/回写/展开/越界。"""
@@ -12,8 +12,8 @@ from datetime import date, datetime
 
 import pytest
 
-from zquant.core.errors import ZQuantError
-from zquant.data.calendar import TradeCalendar
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.data.calendar import TradeCalendar
 
 # 2024-01 沪深交易日（跳过周末）
 _JAN24 = [
@@ -46,7 +46,7 @@ def test_csv_roundtrip(tmp_path) -> None:  # type: ignore[no-untyped-def]
 
 
 def test_from_csv_missing_file_raises(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         TradeCalendar.from_csv(tmp_path / "nope.csv")
 
 
@@ -70,7 +70,7 @@ def test_derive_and_writeback(tmp_path) -> None:  # type: ignore[no-untyped-def]
 
 
 def test_derive_empty_raises() -> None:
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         TradeCalendar.derive([])
 
 
@@ -89,7 +89,7 @@ def test_expand_warmup() -> None:
     assert warm == _JAN24[1:4]
     # warmup=0 → 空
     assert cal.expand_warmup(date(2024, 1, 8), 0) == []
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         cal.expand_warmup(date(2024, 1, 8), -1)
 
 
@@ -106,7 +106,7 @@ def test_contains_and_out_of_range() -> None:
     assert cal.contains(date(2024, 1, 8))
     assert not cal.contains(date(2024, 1, 6))  # 周六
     cal.assert_in_range(_JAN24[0])  # 不抛
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         cal.assert_in_range(date(2023, 12, 29))
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         cal.assert_in_range(date(2024, 2, 1))

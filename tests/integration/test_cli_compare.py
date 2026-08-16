@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 16:30:00
-# @update_time        : 2026/08/16 16:30:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-C01..C03：compare 对照表/lineage 树/rerun 谱系指向/diff（设计 10.3）
 
 """T-C01..C03（M2-P1/P2, 设计 10.3）。
@@ -19,16 +19,16 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from mtzquant.cli import app
+from mtzquant.engine.runner import run_task
 from tests.fixtures.backtest_env import make_backtest_env
-from zquant.cli import app
-from zquant.engine.runner import run_task
 
 runner = CliRunner()
 
 
 def _prepare(tmp_path: Path, *, price: float = 10.0) -> tuple[str, str]:
     """落盘 settings（DB 指向 tmp）+ 两次 run（不同参数 → 不同指标/净值）。"""
-    from zquant.config import DatabaseSettings
+    from mtzquant.config import DatabaseSettings
 
     env = make_backtest_env(tmp_path, price=price)
     db_url = f"sqlite:///{tmp_path / 'zq.db'}"
@@ -45,7 +45,7 @@ def _prepare(tmp_path: Path, *, price: float = 10.0) -> tuple[str, str]:
 
 
 def _invoke(tmp_path, settings_path, args, monkeypatch):  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("ZQUANT_SETTINGS", str(settings_path))
+    monkeypatch.setenv("MTZQUANT_SETTINGS", str(settings_path))
     monkeypatch.chdir(tmp_path)
     return runner.invoke(app, args)
 

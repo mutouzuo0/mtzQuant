@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 06:48:31
+# @update_time        : 2026/08/16 21:59:08
 # @description : I1 BacktestSession 生产会话测试：买卖记账/初始持仓/T+1 拒单（设计 5.1/4.5）
 
 """BacktestSession 组件测试（阶段 I 生产路径）。
@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.engine.runner import run_task
+from mtzquant.engine.session import TaskConfig, normalize_universe
 from tests.fixtures.backtest_env import make_backtest_env
-from zquant.core.errors import ZQuantError
-from zquant.engine.runner import run_task
-from zquant.engine.session import TaskConfig, normalize_universe
 
 CODE = "510300.SH"
 BUY_AMOUNT = round(10.01 * 50_000, 2)  # 500500.0
@@ -110,5 +110,5 @@ def test_session_missing_strategy_file(tmp_path: Path) -> None:
     """策略文件缺失 → 结构化错误（runner 装配前校验）。"""
     env = make_backtest_env(tmp_path)
     env.task.strategy.file = str(tmp_path / "nope.py")
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         run_task(env.task, settings=env.settings, out_root=env.out_root, persist=False)

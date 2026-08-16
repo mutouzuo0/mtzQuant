@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 02:42:00
-# @update_time        : 2026/08/16 02:42:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-E01~E04/E10：orderbook/broker/engine/resultstore 组件测试（设计 5.3/5.1/5.6）
 
 """T-E01~E04 / T-E10：引擎内核组件测试。
@@ -17,16 +17,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from zquant.core.types import InstrumentType
-from zquant.engine.broker import BrokerSim, MatchingModels
-from zquant.engine.instrument import Board, FeeParams, InstrumentProfile, LimitRule
-from zquant.engine.models.bar import MinimalBar
-from zquant.engine.models.fee import FeeModel
-from zquant.engine.models.fill_price import FillModel, PriceBasis
-from zquant.engine.models.liquidity import LiquidityModel
-from zquant.engine.models.slippage import SlippageModel
-from zquant.engine.orderbook import OpenOrderBook
-from zquant.engine.orders import (
+from mtzquant.core.types import InstrumentType
+from mtzquant.engine.broker import BrokerSim, MatchingModels
+from mtzquant.engine.instrument import Board, FeeParams, InstrumentProfile, LimitRule
+from mtzquant.engine.models.bar import MinimalBar
+from mtzquant.engine.models.fee import FeeModel
+from mtzquant.engine.models.fill_price import FillModel, PriceBasis
+from mtzquant.engine.models.liquidity import LiquidityModel
+from mtzquant.engine.models.slippage import SlippageModel
+from mtzquant.engine.orderbook import OpenOrderBook
+from mtzquant.engine.orders import (
     Order,
     OrderDirection,
     OrderEventType,
@@ -34,7 +34,7 @@ from zquant.engine.orders import (
     OrderStyle,
     TimeInForce,
 )
-from zquant.engine.results import FlushPolicy, ResultStore
+from mtzquant.engine.results import FlushPolicy, ResultStore
 
 RUN = "r-test"
 
@@ -214,7 +214,7 @@ def test_capacity_caps_partial_fill() -> None:
 # T-E04 ten-stage engine order
 # ------------------------------------------------------------------
 def test_ten_stage_sequence() -> None:
-    from zquant.engine.engine import UnifiedBacktestEngine
+    from mtzquant.engine.engine import UnifiedBacktestEngine
 
     engine = UnifiedBacktestEngine(_DummySession())
     engine.run()

@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 11:22:00
-# @update_time        : 2026/08/16 11:40:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-PT01..PT17：PTrade 适配器——字段投影/状态矩阵/BarData/API 族/设置族/调度/detect
 
 """T-PT01..PT17（M2-L, 设计 4.7 / 附录C）。
@@ -21,19 +21,19 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.fixtures.backtest_env import make_backtest_env
-from zquant.adapters.base import _default_registry
-from zquant.adapters.ptrade.adapter import PTradeAdapter
-from zquant.adapters.ptrade.objects import (
+from mtzquant.adapters.base import _default_registry
+from mtzquant.adapters.ptrade.adapter import PTradeAdapter
+from mtzquant.adapters.ptrade.objects import (
     PTRADE_STATUS,
     make_bar_data,
     ptrade_status_of,
 )
-from zquant.core.errors import ZQuantError
-from zquant.engine.engine import UnifiedBacktestEngine
-from zquant.engine.results import ResultStore
-from zquant.engine.runner import _settings_fees, build_pipeline
-from zquant.engine.session import BacktestSession
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.engine.engine import UnifiedBacktestEngine
+from mtzquant.engine.results import ResultStore
+from mtzquant.engine.runner import _settings_fees, build_pipeline
+from mtzquant.engine.session import BacktestSession
+from tests.fixtures.backtest_env import make_backtest_env
 
 
 def _ptrade_run(
@@ -147,7 +147,7 @@ class _FakeOrder:
 
 
 def test_pt02_status_matrix() -> None:
-    from zquant.engine.orders import OrderStatus
+    from mtzquant.engine.orders import OrderStatus
 
     m = [
         (_FakeOrder(OrderStatus.PENDING, 1000, 0), "2"),
@@ -401,7 +401,7 @@ run_daily(context, lambda ctx: None, '09:30')
 
 
 def test_pt14_run_daily_only_in_initialize(tmp_path: Path) -> None:
-    with pytest.raises(ZQuantError) as ei:
+    with pytest.raises(MtzQuantError) as ei:
         _ptrade_run(tmp_path, BODY_RUN_DAILY_LATE, init_extra="set_universe(['510300.SS'])", n=3)
     assert "initialize" in str(ei.value)
 
@@ -479,7 +479,7 @@ def test_pt16_run_interval_rejected(tmp_path: Path) -> None:
 
     adapter._api_namespace()  # 确保 gateway 就绪
     adapter._in_initialize = True
-    with pytest.raises(ZQuantError) as ei:
+    with pytest.raises(MtzQuantError) as ei:
         adapter.run_interval(None, lambda ctx: None, 60)
     assert "run_interval" in str(ei.value)
 

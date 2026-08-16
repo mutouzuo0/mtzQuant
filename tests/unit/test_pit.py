@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from zquant.core.pit import PitQuery
+from mtzquant.core.pit import PitQuery
 
 
 def _dt(s: str) -> datetime:

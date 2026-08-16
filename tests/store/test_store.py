@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 03:20:00
-# @update_time        : 2026/08/16 03:20:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-S01/S03/S04/S05：store 模型约束/崩溃半程数据/快照 sha256 复用/参数脱敏
 
 """T-S01/S03/S04/S05：持久化（设计 8.3/8.7）。"""
@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from zquant.config import sanitize_params
-from zquant.store.models import BacktestDailyNav, init_db
-from zquant.store.repo import DetailRepo, RunRepo
+from mtzquant.config import sanitize_params
+from mtzquant.store.models import BacktestDailyNav, init_db
+from mtzquant.store.repo import DetailRepo, RunRepo
 
 
 @pytest.fixture()
@@ -70,7 +70,7 @@ def test_ts04_snapshot_sha256_reuse(engine) -> None:  # type: ignore[no-untyped-
 
 def test_ts03_crash_keeps_flushed_rows(engine, tmp_path) -> None:  # type: ignore[no-untyped-def]
     """T-S03: 崩溃半程——已 flush 入库的数据保留（缓冲未刷的丢弃, 宁慢不丢）。"""
-    from zquant.store.write_buffer import BufferConfig, WriteBuffer
+    from mtzquant.store.write_buffer import BufferConfig, WriteBuffer
 
     repo = RunRepo(engine)
     snap, _ = repo.get_or_create_snapshot(file_name="s.py", code_text="x", sha256="c" * 64)

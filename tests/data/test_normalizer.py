@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 01:02:00
-# @update_time        : 2026/08/16 01:02:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-D03：归一黄金比对 + 停牌/缺失值/涨跌停（设计 3.3）
 
 """T-D03：三格式同源数据归一后与手算期望表逐列全等（TOL=1e-10）；含停牌与缺失值规则。"""
@@ -11,8 +11,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from zquant.core.types import Frequency
-from zquant.data.normalizer import DataNormalizer, dt_index_to_ms
+from mtzquant.core.types import Frequency
+from mtzquant.data.normalizer import DataNormalizer, dt_index_to_ms
 
 from .conftest import FILL_TOL, load_expected_normalized, write_day_csv
 
@@ -135,7 +135,7 @@ def test_duplicate_dt_keeps_latest(make_driver, tmp_path) -> None:  # type: igno
 
 
 def test_empty_input_raises(make_driver, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    from zquant.core.errors import ZQuantError
+    from mtzquant.core.errors import MtzQuantError
 
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         DataNormalizer().normalize(None, "510300.SH")  # type: ignore[arg-type]

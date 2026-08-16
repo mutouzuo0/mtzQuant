@@ -1,10 +1,10 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 06:48:31
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-X02 replay 差异检测：篡改一段 CSV 价格 → 指出标的×交易日（设计 8.8）
 
-"""T-X02：跑 run A 后篡改某标的 CSV 价格 → `zquant replay` 重跑并 diff。
+"""T-X02：跑 run A 后篡改某标的 CSV 价格 → `mtzquant replay` 重跑并 diff。
 
 断言:
   篡改后 manifest_hash 变化（data_manifest 定位到标的）
@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from mtzquant.engine.replay import replay_run
+from mtzquant.engine.runner import run_task
 from tests.fixtures.backtest_env import make_backtest_env
-from zquant.engine.replay import replay_run
-from zquant.engine.runner import run_task
 
 
 def test_tx02_replay_detects_tampered_price(tmp_path: Path) -> None:

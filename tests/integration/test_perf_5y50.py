@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:50:00
-# @update_time        : 2026/08/16 06:50:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-P01 性能预算（50 标的×5 年 <30s）+ T-P02 写库不阻塞（引擎占比>90%）
 
 """T-P01/T-P02（设计 12.1-M1 性能验收, 普通笔记本口径）。
@@ -24,9 +24,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from zquant.config import CacheSettings, DatabaseSettings, DataSettings, LocalCsvSettings, Settings
-from zquant.engine.runner import build_pipeline, run_task
-from zquant.engine.session import TaskConfig
+from mtzquant.config import (
+    CacheSettings,
+    DatabaseSettings,
+    DataSettings,
+    LocalCsvSettings,
+    Settings,
+)
+from mtzquant.engine.runner import build_pipeline, run_task
+from mtzquant.engine.session import TaskConfig
 
 N_CODES = 50
 N_DAYS = 5 * 250  # 5 年 × 250 交易日

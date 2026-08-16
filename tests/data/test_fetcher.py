@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 15:30:00
-# @update_time        : 2026/08/16 15:30:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-DF01..DF11：O 阶段 DataFetcher/覆盖/限流/驱动/主数据/导入（全 mock）
 
 """T-DF01..DF11（M2-O, 设计 3.9/3.10/3.11）——HTTP 全 mock。
@@ -18,11 +18,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from zquant.core.errors import ZQuantError
-from zquant.data.coverage import CoverageChecker
-from zquant.data.duckdb_query import DuckDBQuery
-from zquant.data.fetcher import DataFetcher
-from zquant.data.ratelimit import RateLimitController, RateSpec, TokenBucketLimiter
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.data.coverage import CoverageChecker
+from mtzquant.data.duckdb_query import DuckDBQuery
+from mtzquant.data.fetcher import DataFetcher
+from mtzquant.data.ratelimit import RateLimitController, RateSpec, TokenBucketLimiter
 
 CODE = "510300.SH"
 START = date(2024, 1, 1)
@@ -93,7 +93,7 @@ def test_df01_readonly_guard(tmp_path: Path) -> None:
             "SELECT * FROM x; UPDATE t SET a=1",
             "PRAGMA database_list",
         ):
-            with pytest.raises(ZQuantError):
+            with pytest.raises(MtzQuantError):
                 q.execute_select(bad)
         # 合法 SELECT 放行
         df = q.execute_select("SELECT 1 AS a")
@@ -219,7 +219,7 @@ class _FakePro:
 
 
 def test_df04_tushare_driver_stock_and_etf() -> None:
-    from zquant.data.drivers.tushare_driver import TushareSource
+    from mtzquant.data.drivers.tushare_driver import TushareSource
 
     pro = _FakePro(
         {
@@ -239,14 +239,14 @@ def test_df04_tushare_driver_stock_and_etf() -> None:
 
 
 def test_df04_tushare_token_missing() -> None:
-    from zquant.data.drivers.tushare_driver import TushareSource
+    from mtzquant.data.drivers.tushare_driver import TushareSource
 
-    with pytest.raises(ZQuantError, match="token"):
+    with pytest.raises(MtzQuantError, match="token"):
         TushareSource(secrets={}).fetch_kline(CODE, START, END, instrument_type="etf")
 
 
 def test_df05_akshare_driver_delegates_fetch_fn(tmp_path: Path) -> None:
-    from zquant.data.drivers.akshare_driver import AkshareSource
+    from mtzquant.data.drivers.akshare_driver import AkshareSource
 
     src = AkshareSource(fetch_fn=lambda code, s, e: _df(["20240102"]))
     df = src.fetch_kline(CODE, START, END, instrument_type="etf")

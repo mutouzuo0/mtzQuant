@@ -11,8 +11,8 @@ from datetime import datetime
 
 import pytest
 
-from zquant.core.errors import ZQuantError
-from zquant.core.types import (
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.core.types import (
     DAILY_BAR_TIME,
     KLINE_COLUMNS,
     AdjustMode,
@@ -94,12 +94,12 @@ def test_time_model_market_data_event_equals_published() -> None:
 
 
 def test_time_model_rejects_published_before_event() -> None:
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         TimeModel(event_time=_dt("2023-09-30"), published_at=_dt("2023-08-01"))
 
 
 def test_time_model_rejects_available_before_published() -> None:
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         TimeModel(
             event_time=_dt("2023-09-30"),
             published_at=_dt("2023-10-28"),

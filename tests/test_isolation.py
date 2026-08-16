@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 06:48:31
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-X03 隔离：环境清洁（剔除 *_TOKEN/API_KEY）+ 超时进程树 terminate（设计 2.4）
 
 """T-X03：`--isolate` subprocess 隔离最小实现。
@@ -9,7 +9,7 @@
 断言:
   环境清洁 —— clean_env 剔除 *_TOKEN/API_KEY/SECRET/PASSWORD/WEBHOOK, 保留正常变量
   超时     —— 超过 timeout 的极限任务被进程树 terminate（marker 文件未产生, returncode=124）
-  CLI     —— `zquant run --isolate` 子进程经 ZQUANT_SETTINGS 读到隔离配置并正常跑完
+  CLI     —— `mtzquant run --isolate` 子进程经 MTZQUANT_SETTINGS 读到隔离配置并正常跑完
 """
 
 from __future__ import annotations
@@ -20,15 +20,15 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from mtzquant.worker.isolate import clean_env, run_isolated
 from tests.fixtures.backtest_env import make_backtest_env
-from zquant.worker.isolate import clean_env, run_isolated
 
 
 def test_tx03_clean_env_removes_sensitive_vars() -> None:
     """环境清洁: 剔除敏感变量, 非敏感保留（3.6 密钥纪律）。"""
     env = {
         "PATH": "/usr/bin",
-        "ZQUANT_TUSHARE_TOKEN": "secret",
+        "MTZQUANT_TUSHARE_TOKEN": "secret",
         "FOO_API_KEY": "k",
         "DB_PASSWORD": "p",
         "MY_SECRET": "s",
@@ -36,7 +36,7 @@ def test_tx03_clean_env_removes_sensitive_vars() -> None:
         "NORMAL_VAR": "ok",
     }
     clean = clean_env(env)
-    assert "ZQUANT_TUSHARE_TOKEN" not in clean
+    assert "MTZQUANT_TUSHARE_TOKEN" not in clean
     assert "FOO_API_KEY" not in clean
     assert "DB_PASSWORD" not in clean
     assert "MY_SECRET" not in clean
@@ -56,17 +56,17 @@ def test_tx03_timeout_terminates_process_tree(tmp_path: Path) -> None:
 
 
 def test_tx03_cli_isolate_runs_subprocess(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """CLI --isolate: 子进程经 ZQUANT_SETTINGS 读到隔离配置并完成回测。"""
+    """CLI --isolate: 子进程经 MTZQUANT_SETTINGS 读到隔离配置并完成回测。"""
     env = make_backtest_env(tmp_path)
     settings_path = tmp_path / "settings.json"
     settings_path.write_text(env.settings.model_dump_json(), encoding="utf-8")
     task_path = tmp_path / "task.json"
     task_path.write_text(json.dumps(env.task.model_dump(), ensure_ascii=False), encoding="utf-8")
 
-    # 子进程需可 import zquant（非 pip 安装时经 PYTHONPATH=仓库根, 不属敏感变量被保留）
+    # 子进程需可 import mtzquant（非 pip 安装时经 PYTHONPATH=仓库根, 不属敏感变量被保留）
     repo_root = Path(__file__).resolve().parents[1]
     monkeypatch.setenv("PYTHONPATH", str(repo_root))
-    monkeypatch.setenv("ZQUANT_SETTINGS", str(settings_path))
+    monkeypatch.setenv("MTZQUANT_SETTINGS", str(settings_path))
     monkeypatch.setenv("TUSHARE_TOKEN", "must-be-cleaned-in-child")
     monkeypatch.setenv("MY_API_KEY", "must-be-cleaned-in-child")
     monkeypatch.chdir(tmp_path)
@@ -83,6 +83,6 @@ def test_tx03_cli_isolate_runs_subprocess(tmp_path: Path, monkeypatch) -> None: 
 
 def runner_cli_app():
     """延迟导入 CLI app（避免 import 顺序副作用）。"""
-    from zquant.cli import app
+    from mtzquant.cli import app
 
     return app

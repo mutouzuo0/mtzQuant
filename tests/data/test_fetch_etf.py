@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 01:34:00
-# @update_time        : 2026/08/16 01:34:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-D08：下载器 mock（幂等/去重/原子/限流/熔断, 3.9）
 
 """T-D08：ETF 下载器（HTTP 全 mock, 设计 3.9）——幂等/去重断言/原子性/限流/退避/熔断。"""
@@ -15,8 +15,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from zquant.config import get_tushare_token
-from zquant.data.fetch_etf import EtfDownloader, TokenBucketLimiter
+from mtzquant.config import get_tushare_token
+from mtzquant.data.fetch_etf import EtfDownloader, TokenBucketLimiter
 
 START = date(2024, 1, 1)
 END = date(2024, 1, 31)
@@ -132,9 +132,9 @@ def test_atomic_write_preserves_original_on_failure(tmp_path, monkeypatch) -> No
     def bad_replace(src, dst):  # type: ignore[no-untyped-def]
         raise OSError("模拟写盘失败")
 
-    monkeypatch.setattr("zquant.data.fetch_etf.os.replace", bad_replace)
+    monkeypatch.setattr("mtzquant.data.fetch_etf.os.replace", bad_replace)
     report = dl.download(["510300.SH"], date(2024, 1, 2), date(2024, 1, 31))[0]
-    monkeypatch.setattr("zquant.data.fetch_etf.os.replace", real_replace)
+    monkeypatch.setattr("mtzquant.data.fetch_etf.os.replace", real_replace)
     assert report.status == "failed"
     assert p.read_text(encoding="utf-8") == original
     assert not list(p.parent.glob("*.tmp"))  # 无残留临时文件
@@ -212,7 +212,7 @@ def test_circuit_breaker_after_threshold(tmp_path) -> None:  # type: ignore[no-u
 
 
 def test_token_priority_env_over_secrets(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("ZQUANT_TUSHARE_TOKEN", "env_token")
+    monkeypatch.setenv("MTZQUANT_TUSHARE_TOKEN", "env_token")
     secrets = {"tushare": {"token": "file_token"}}
     assert get_tushare_token(secrets) == "env_token"  # 环境变量 > secrets.json（3.6）
 

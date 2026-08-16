@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from zquant.engine.orders import OrderDirection, OrderStatus
+from mtzquant.engine.orders import OrderDirection, OrderStatus
 
 from .conftest import flat_series
 from .daily import DailyDriver
@@ -36,7 +36,7 @@ def _build() -> tuple[DailyDriver, list]:
     bars = flat_series(CODE, N)
     driver.add_data({CODE: bars})
     # 初始持仓 10,000 股 @ 10.0（市价 100,000）
-    from zquant.engine.account import Position
+    from mtzquant.engine.account import Position
 
     driver.account.positions[CODE] = Position(code=CODE, total_qty=HELD, avg_cost=PX, last_price=PX)
     return driver, bars
@@ -106,7 +106,7 @@ def test_g08_target_value_sell_direction() -> None:
 
 def test_g08_lot_floor_boundary_3450() -> None:
     """整手取整边界：差额 34,500 → 3,450 股 → floor 3,400（4.5 归一）。"""
-    from zquant.engine.account import Position
+    from mtzquant.engine.account import Position
 
     broker = MockBroker()
     driver = DailyDriver(broker, initial_cash=1_000_000.0)

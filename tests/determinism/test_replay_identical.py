@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 06:48:31
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-X01 确定性重放：同 manifest 两跑 orders/fills 逐笔、nav 逐点、metrics 全等（8.8）
 
 """T-X01：同输入连续跑两次 → 逐笔/逐点一致（设计 8.8 确定性验收）。
@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mtzquant.engine.runner import run_task
 from tests.fixtures.backtest_env import make_backtest_env
-from zquant.engine.runner import run_task
 
 
 def _strip_run_id(items: list[dict], *, key: str = "order_id") -> list[dict]:
@@ -50,7 +50,7 @@ def test_tx01_same_task_two_runs_identical(tmp_path: Path) -> None:
 
 def test_tx01_manifest_strategy_sha256_matches_snapshot(tmp_path: Path) -> None:
     """清单 strategy_sha256 == 策略源码哈希（8.3.2 与 snapshot 同源）。"""
-    from zquant.engine.manifest import sha256_text
+    from mtzquant.engine.manifest import sha256_text
 
     env = make_backtest_env(tmp_path)
     result = run_task(env.task, settings=env.settings, out_root=env.out_root, persist=False)

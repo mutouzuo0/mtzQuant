@@ -1,14 +1,14 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 03:22:00
-# @update_time        : 2026/08/16 03:22:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-S02：WriteBuffer 批量 flush（条数/时间）+ 背压阻塞（设计 8.7）
 
 """T-S02：WriteBuffer（设计 8.7）——三触发与背压。"""
 
 from __future__ import annotations
 
-from zquant.store.write_buffer import BufferConfig, WriteBuffer
+from mtzquant.store.write_buffer import BufferConfig, WriteBuffer
 
 
 def test_batch_size_trigger() -> None:

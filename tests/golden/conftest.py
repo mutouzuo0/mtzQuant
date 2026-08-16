@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from zquant.core.errors import ZQuantError
+from mtzquant.core.errors import MtzQuantError
 
 from .daily import DailyDriver, DayBar, LotFloor
 from .framework import MockBroker
@@ -126,7 +126,7 @@ def corp_cash_div(
     def _on_ex() -> None:
         pos = driver.account.positions.get(code)
         if pos is None:
-            raise ZQuantError("分红登记时无持仓", stage="golden_conftest")
+            raise MtzQuantError("分红登记时无持仓", stage="golden_conftest")
         dividend = pos.total_qty * per_share
         driver.account.credit_dividend(dividend)
 

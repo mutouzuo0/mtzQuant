@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 10:02:00
-# @update_time        : 2026/08/16 10:02:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-A01..A08：共享内核——g/log/context/portfolio 投影/下单族/cutoff/compat/代码互转
 
 """T-A01..A08（M2-K 共享内核, 设计 4.4/4.5/4.9）。
@@ -16,14 +16,14 @@ from datetime import date, datetime
 
 import pandas as pd
 
-from zquant.adapters.shared.code_style import denormalize_code, round_trip
-from zquant.adapters.shared.compat import compat_report, not_implemented, register_api
-from zquant.adapters.shared.context_factory import make_context, refresh_context
-from zquant.adapters.shared.data_apis import DataApiCore
-from zquant.adapters.shared.g_container import GContainer
-from zquant.adapters.shared.log_api import make_log
-from zquant.adapters.shared.order_apis import make_order_api
-from zquant.adapters.shared.portfolio_view import (
+from mtzquant.adapters.shared.code_style import denormalize_code, round_trip
+from mtzquant.adapters.shared.compat import compat_report, not_implemented, register_api
+from mtzquant.adapters.shared.context_factory import make_context, refresh_context
+from mtzquant.adapters.shared.data_apis import DataApiCore
+from mtzquant.adapters.shared.g_container import GContainer
+from mtzquant.adapters.shared.log_api import make_log
+from mtzquant.adapters.shared.order_apis import make_order_api
+from mtzquant.adapters.shared.portfolio_view import (
     UniformPortfolio,
     UniformPosition,
     jq_portfolio_view,
@@ -32,8 +32,8 @@ from zquant.adapters.shared.portfolio_view import (
     ptrade_position_view,
     uniform_portfolio,
 )
-from zquant.core.errors import ZQuantError
-from zquant.engine.orders import OrderDirection, OrderStyle
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.engine.orders import OrderDirection, OrderStyle
 
 
 # ------------------------------------------------------------------
@@ -53,10 +53,10 @@ def test_g_container_missing_is_structured() -> None:
     import pytest
 
     g = GContainer()
-    with pytest.raises(ZQuantError) as ei:
+    with pytest.raises(MtzQuantError) as ei:
         _ = g.bars
     assert "bars" in str(ei.value)  # 结构化提示（4.4, 非裸 AttributeError）
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         _ = g["code"]
     # 裸下划线属性仍走 AttributeError（Python 语义不破坏）
     with pytest.raises(AttributeError):
@@ -200,7 +200,7 @@ def test_portfolio_projection_field_table() -> None:
 
 def test_uniform_portfolio_from_account_view() -> None:
     """AccountView（session 注入形态）→ UniformPortfolio 归一。"""
-    from zquant.engine.session import AccountView
+    from mtzquant.engine.session import AccountView
 
     view = AccountView(
         positions={

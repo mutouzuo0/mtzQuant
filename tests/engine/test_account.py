@@ -13,9 +13,9 @@ from datetime import datetime as dt
 
 import pytest
 
-from zquant.core.errors import ZQuantError
-from zquant.engine.account import Account
-from zquant.engine.orders import Fill, OrderDirection
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.engine.account import Account
+from mtzquant.engine.orders import Fill, OrderDirection
 
 T = dt(2026, 8, 15, 9, 35)
 
@@ -71,7 +71,7 @@ def test_t_plus_one_sell_guard() -> None:
     acct.apply_fill(_fill("600000.SH", OrderDirection.BUY, 100.0, 10.0))
     pos = acct.positions["600000.SH"]
     assert pos.closeable_qty == 0.0
-    with pytest.raises(ZQuantError, match="超过可卖"):
+    with pytest.raises(MtzQuantError, match="超过可卖"):
         acct.apply_fill(_fill("600000.SH", OrderDirection.SELL, 50.0, 11.0))
 
     acct.settle_day()  # 次日
@@ -119,10 +119,10 @@ def test_cash_four_class_identity() -> None:
 def test_freeze_bounds_and_day_settle() -> None:
     """冻结/释放超界报错；settle_day 释放全部冻结并清零今日买入。"""
     acct = _account(cash=1_000.0)
-    with pytest.raises(ZQuantError, match="冻结金额非法"):
+    with pytest.raises(MtzQuantError, match="冻结金额非法"):
         acct.freeze_cash(2_000.0)
     acct.freeze_cash(300.0)
-    with pytest.raises(ZQuantError, match="释放冻结金额非法"):
+    with pytest.raises(MtzQuantError, match="释放冻结金额非法"):
         acct.release_frozen_cash(999.0)
     acct.apply_fill(_fill("600000.SH", OrderDirection.BUY, 100.0, 3.0))  # 300
     assert acct.positions["600000.SH"].today_qty == 100.0
@@ -140,15 +140,15 @@ def test_position_market_value_and_validation() -> None:
     assert pos.market_value == pytest.approx(2_500.0)
     assert pos.closeable_qty == 0.0
 
-    with pytest.raises(ZQuantError, match="买入参数非法"):
+    with pytest.raises(MtzQuantError, match="买入参数非法"):
         pos.buy(0.0, 10.0)
-    with pytest.raises(ZQuantError, match="卖出参数非法"):
+    with pytest.raises(MtzQuantError, match="卖出参数非法"):
         pos.sell(-1.0, 10.0)
-    with pytest.raises(ZQuantError, match="超过可卖"):
+    with pytest.raises(MtzQuantError, match="超过可卖"):
         pos.sell(50.0, 10.0)  # today_qty=200 未 roll
 
     # 负初始资金
-    with pytest.raises(ZQuantError, match="初始资金不能为负"):
+    with pytest.raises(MtzQuantError, match="初始资金不能为负"):
         Account(run_id="r", initial_cash=-1.0, available_cash=-1.0)
 
 

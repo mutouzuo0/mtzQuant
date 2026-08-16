@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 12:30:00
-# @update_time        : 2026/08/16 12:30:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : g07/g08 平台版（PTrade）：佣金边界 + target_value 整手归一/零差忽略/方向
 
 """g07/g08 平台版（PTrade, D3）。手算依据与 native 一致:
@@ -10,9 +10,9 @@
 
 from __future__ import annotations
 
+from mtzquant.engine.account import Position
+from mtzquant.engine.orders import OrderDirection
 from tests.golden.conftest import flat_series  # noqa: F401
-from zquant.engine.account import Position
-from zquant.engine.orders import OrderDirection
 
 from .bridge import run_ptrade_golden
 

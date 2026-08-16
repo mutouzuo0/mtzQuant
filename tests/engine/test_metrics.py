@@ -15,7 +15,7 @@ from datetime import date
 import numpy as np
 import pytest
 
-from zquant.engine.metrics import (
+from mtzquant.engine.metrics import (
     TradeRecord,
     compute_metrics,
     pair_fifo_rounds,

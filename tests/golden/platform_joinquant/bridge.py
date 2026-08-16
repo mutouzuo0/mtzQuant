@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 13:22:00
-# @update_time        : 2026/08/16 13:22:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : N6 平台版黄金桥接：joinquant 策略脚本 → DailyDriver（D3: 数据/oracle 复用）
 
 """聚宽平台版黄金桥接（M2-N6, 计划 D3 纪律）。
@@ -21,9 +21,9 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
-from zquant.adapters.joinquant.adapter import JoinQuantAdapter
-from zquant.core.codes import normalize_code
-from zquant.engine.orders import OrderDirection, OrderRequest, OrderStyle
+from mtzquant.adapters.joinquant.adapter import JoinQuantAdapter
+from mtzquant.core.codes import normalize_code
+from mtzquant.engine.orders import OrderDirection, OrderRequest, OrderStyle
 
 
 class _DriverGateway:

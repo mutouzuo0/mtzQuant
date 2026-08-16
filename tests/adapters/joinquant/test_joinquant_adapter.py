@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 13:08:00
-# @update_time        : 2026/08/16 13:08:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-JQ01..JQ10：聚宽适配器——命名空间/数据族快照/下单配置族/调度族/detect
 
 """T-JQ01..JQ10（M2-N, 设计 4.6）。探针机制同 T-PT（g.probe JSON 落盘, 真实链路）。"""
@@ -14,14 +14,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from mtzquant.adapters.base import _default_registry
+from mtzquant.adapters.joinquant.adapter import JoinQuantAdapter
+from mtzquant.core.errors import MtzQuantError, NotImplementedApiError
+from mtzquant.engine.engine import UnifiedBacktestEngine
+from mtzquant.engine.results import ResultStore
+from mtzquant.engine.runner import _settings_fees, build_pipeline
+from mtzquant.engine.session import BacktestSession
 from tests.fixtures.backtest_env import make_backtest_env
-from zquant.adapters.base import _default_registry
-from zquant.adapters.joinquant.adapter import JoinQuantAdapter
-from zquant.core.errors import NotImplementedApiError, ZQuantError
-from zquant.engine.engine import UnifiedBacktestEngine
-from zquant.engine.results import ResultStore
-from zquant.engine.runner import _settings_fees, build_pipeline
-from zquant.engine.session import BacktestSession
 
 
 def _jq_run(
@@ -282,7 +282,7 @@ def test_jq08_run_daily_every_bar_no_degradation(tmp_path: Path) -> None:
 def test_jq08_run_daily_only_in_initialize(tmp_path: Path) -> None:
     adapter = JoinQuantAdapter()
     adapter._in_initialize = False
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         adapter.run_daily(lambda ctx: None, "9:30")
 
 

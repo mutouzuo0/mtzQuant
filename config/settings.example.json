@@ -36,7 +36,7 @@
     }
   },
   "database": {
-    "url": "sqlite:///./zquant.db",
+    "url": "sqlite:///./mtzquant.db",
     "echo": false,
     "batch_size": 500,
     "batch_flush_interval_ms": 500,

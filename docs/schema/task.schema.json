@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://zquant.local/schema/task.schema.json",
-  "title": "zQuant 回测任务配置（设计 3.6）",
+  "$id": "https://mtzquant.local/schema/task.schema.json",
+  "title": "mtzQuant 回测任务配置（设计 3.6）",
   "description": "回测任务唯一事实来源: strategy.file/type/entry + backtest 区间/资金/基准 + universe + fees 覆盖项。",
   "type": "object",
   "required": ["task_name", "strategy", "backtest", "universe"],

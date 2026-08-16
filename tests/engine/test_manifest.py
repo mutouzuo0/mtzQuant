@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 06:48:31
+# @update_time        : 2026/08/16 21:59:08
 # @description : I3 RunManifest 单测：哈希工具/数据清单/聚合字段（设计 8.8）
 
 """RunManifest 组件测试（8.8 确定性清单）。"""
@@ -11,14 +11,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tests.fixtures.backtest_env import make_backtest_env
-from zquant.engine.manifest import (
+from mtzquant.engine.manifest import (
     build_data_manifest,
     build_manifest,
     canonical_json,
     config_hash,
     sha256_text,
 )
+from tests.fixtures.backtest_env import make_backtest_env
 
 
 def test_sha_and_canonical() -> None:
@@ -59,7 +59,7 @@ def test_build_manifest_fields(tmp_path: Path) -> None:
     )
     assert manifest["strategy_sha256"] == sha256_text(strategy_code)
     assert manifest["random_seed"] == 42
-    assert manifest["zquant_version"]
+    assert manifest["mtzquant_version"]
     assert manifest["config_hash"] == config_hash(task_dict)
     assert "data_manifest" in manifest and env.code in manifest["data_manifest"]
     # manifest_hash == 规范化「指纹」（剔除 created_at 运行时刻）的 sha256（8.8 确定性聚合）
@@ -68,6 +68,6 @@ def test_build_manifest_fields(tmp_path: Path) -> None:
 
 
 def _pipeline(env):
-    from zquant.engine.runner import build_pipeline
+    from mtzquant.engine.runner import build_pipeline
 
     return build_pipeline(env.settings, env.task.universe)

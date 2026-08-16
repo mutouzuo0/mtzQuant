@@ -1,5 +1,5 @@
 # ============================================================
-# zQuant .gitignore —— 决策 D4：以下内容一律不得提交
+# mtzQuant .gitignore —— 决策 D4：以下内容一律不得提交
 # ============================================================
 
 # ---- 密钥与真实配置（仓库只提交 *.example.json 模板）----
@@ -9,10 +9,11 @@ config/settings.json
 *.local.json
 
 # ---- 本地数据与运行产物 ----
-# 注意: 必须锚定根目录（/data/），否则会误伤 zquant/data/ 源码与 tests/data/ 测试
+# 注意: 必须锚定根目录（/data/），否则会误伤 mtzquant/data/ 源码与 tests/data/ 测试
 /data/
 results/
 .cache/
+mtzquant.db*
 zquant.db*
 *.sqlite3
 *.parquet

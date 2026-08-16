@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author            : 木头左
 # @create_time       : 2026/08/16 02:20:00
-# @update_time       : 2026/08/16 02:20:00
+# @update_time       : 2026/08/16 21:59:08
 # @description : g02 单次买卖（费用/整手）：真实 BrokerSim 买卖侧对称滑点手算断言
 
 """黄金用例 g02：单次买卖（测试方案 §5 g02，防自证最严用例）。
@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from zquant.engine.orders import OrderDirection, OrderStatus
+from mtzquant.engine.orders import OrderDirection, OrderStatus
 
 from .conftest import flat_series, load_expected
 from .daily import DailyDriver

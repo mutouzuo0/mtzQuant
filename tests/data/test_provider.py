@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 01:20:00
-# @update_time        : 2026/08/16 01:20:00
+# @update_time        : 2026/08/16 21:59:08
 # @description : T-D06：Provider PIT + bar_at 二分交叉验证（3.7/3.13）
 
 """T-D06：Provider PIT 强制时点 + numpy 快路径一致性 + 预加载三模式（设计 3.7/3.8/3.13）。"""
@@ -14,13 +14,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from zquant.core.errors import ZQuantError
-from zquant.core.types import Frequency
-from zquant.data.cache import DataCache
-from zquant.data.calendar import TradeCalendar
-from zquant.data.drivers.csv_driver import CsvSourceDriver
-from zquant.data.normalizer import DataNormalizer
-from zquant.data.provider import MarketDataProvider
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.core.types import Frequency
+from mtzquant.data.cache import DataCache
+from mtzquant.data.calendar import TradeCalendar
+from mtzquant.data.drivers.csv_driver import CsvSourceDriver
+from mtzquant.data.normalizer import DataNormalizer
+from mtzquant.data.provider import MarketDataProvider
 
 from .conftest import asof, day_bar_ts, write_day_csv
 
@@ -163,13 +163,13 @@ def test_provider_with_cache(tmp_path) -> None:  # type: ignore[no-untyped-def]
 
 def test_to_frame_to_numpy_placeholder(tmp_path) -> None:  # type: ignore[no-untyped-def]
     prov = _make_provider(tmp_path)
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         prov.to_frame(["510300.SH"], ["close"], asof(2024, 1, 2), asof(2024, 1, 8))
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         prov.to_numpy(["510300.SH"], ["close"], asof(2024, 1, 2), asof(2024, 1, 8))
 
 
 def test_history_n_must_be_positive(tmp_path) -> None:  # type: ignore[no-untyped-def]
     prov = _make_provider(tmp_path)
-    with pytest.raises(ZQuantError):
+    with pytest.raises(MtzQuantError):
         prov.history("510300.SH", ["close"], 0, as_of=asof(2024, 1, 8, 15, 0))

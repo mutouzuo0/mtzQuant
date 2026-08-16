@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from zquant.engine.orders import OrderDirection, OrderStatus
+from mtzquant.engine.orders import OrderDirection, OrderStatus
 
 from .conftest import load_expected, make_bars
 from .daily import DailyDriver

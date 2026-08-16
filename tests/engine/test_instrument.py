@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from zquant.core.errors import ZQuantError
-from zquant.core.types import InstrumentType
-from zquant.engine.instrument import (
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.core.types import InstrumentType
+from mtzquant.engine.instrument import (
     Board,
     FeeParams,
     InstrumentProfile,
@@ -93,7 +93,7 @@ def test_limit_map_growth_boards() -> None:
 def test_limit_map_rejects_nonpositive_prev_close() -> None:
     rule = LimitRule(board=Board.MAIN)
     for bad in (0.0, -1.5):
-        with pytest.raises(ZQuantError, match="昨收价必须为正"):
+        with pytest.raises(MtzQuantError, match="昨收价必须为正"):
             rule.limit_map(bad)
 
 
@@ -118,11 +118,11 @@ def test_t_plus_zero_sellable_quantity() -> None:
 def test_profile_validation() -> None:
     rule = LimitRule(Board.MAIN)
     base = dict(code="x", instrument_type=InstrumentType.STOCK, limit_rule=rule)
-    with pytest.raises(ZQuantError, match="lot_size 必须为正整数"):
+    with pytest.raises(MtzQuantError, match="lot_size 必须为正整数"):
         InstrumentProfile(**base, lot_size=0)
-    with pytest.raises(ZQuantError, match="lot_size 必须为正整数"):
+    with pytest.raises(MtzQuantError, match="lot_size 必须为正整数"):
         InstrumentProfile(**base, lot_size=3.5)
-    with pytest.raises(ZQuantError, match="t_plus 不能为负"):
+    with pytest.raises(MtzQuantError, match="t_plus 不能为负"):
         InstrumentProfile(**base, t_plus=-1)
 
 

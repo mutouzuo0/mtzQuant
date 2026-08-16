@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 06:48:31
+# @update_time        : 2026/08/16 21:59:08
 # @description : 阶段 I 测试共享装配：合成数据 + 策略 + 任务 + Settings（T-X01/X02/I01 共用）
 
 """阶段 I 测试装配（runner/session/replay/CLI 测试共用）。
@@ -18,14 +18,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from zquant.config import (
+from mtzquant.config import (
     CacheSettings,
     DatabaseSettings,
     DataSettings,
     LocalCsvSettings,
     Settings,
 )
-from zquant.engine.session import TaskConfig
+from mtzquant.engine.session import TaskConfig
 
 from .synth import flat_etf_csv
 

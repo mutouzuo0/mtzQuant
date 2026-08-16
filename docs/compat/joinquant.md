@@ -111,9 +111,9 @@
 ## 执行方式
 
 ```bash
-# 一键装载聚宽策略（等价 zquant run --strategy-type joinquant）
-zquant run --strategy strategies/joinquant/dual_ma.py --universe 510300.XSHG
+# 一键装载聚宽策略（等价 mtzquant run --strategy-type joinquant）
+mtzquant run --strategy strategies/joinquant/dual_ma.py --universe 510300.XSHG
 
 # 兼容报告（COMPAT_REGISTRY 登记态，P3 定稿后可 dump）
-python -c "from zquant.adapters.shared.compat import compat_report; print(compat_report('joinquant'))"
+python -c "from mtzquant.adapters.shared.compat import compat_report; print(compat_report('joinquant'))"
 ```

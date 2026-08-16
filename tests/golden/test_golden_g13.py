@@ -19,7 +19,7 @@ from datetime import datetime
 
 import pytest
 
-from zquant.engine.orders import OrderDirection, OrderStatus
+from mtzquant.engine.orders import OrderDirection, OrderStatus
 
 from .conftest import flat_series, make_bars
 from .daily import DailyDriver

@@ -7,27 +7,27 @@
 
 from __future__ import annotations
 
-from zquant.core.errors import (
+from mtzquant.core.errors import (
     InvalidCodeError,
+    MtzQuantError,
     NotImplementedApiError,
-    ZQuantError,
 )
 
 
-def test_zquant_error_carries_structured_fields() -> None:
-    err = ZQuantError("撮合失败", run_id="r_test", stage="broker.fill", hint="检查价格模型")
+def test_mtzquant_error_carries_structured_fields() -> None:
+    err = MtzQuantError("撮合失败", run_id="r_test", stage="broker.fill", hint="检查价格模型")
     assert err.run_id == "r_test"
     assert err.stage == "broker.fill"
     assert err.hint == "检查价格模型"
     # 字符串形式含全部结构信息（CLI 彩色输出时可读）
     text = str(err)
-    assert "[zquant]" in text and "r_test" in text and "hint" not in text
+    assert "[mtzquant]" in text and "r_test" in text and "hint" not in text
 
 
-def test_zquant_error_to_dict_is_machine_readable() -> None:
-    info = ZQuantError("x", stage="s").to_dict()
+def test_mtzquant_error_to_dict_is_machine_readable() -> None:
+    info = MtzQuantError("x", stage="s").to_dict()
     assert set(info) == {"type", "message", "run_id", "stage", "hint"}
-    assert info["type"] == "ZQuantError"
+    assert info["type"] == "MtzQuantError"
 
 
 def test_invalid_code_error_fields() -> None:

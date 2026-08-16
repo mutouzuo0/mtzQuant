@@ -23,18 +23,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from zquant.core.errors import ZQuantError
-from zquant.core.types import InstrumentType
-from zquant.engine.account import Account, Position
-from zquant.engine.broker import BrokerSim, MatchingModels
-from zquant.engine.instrument import Board, FeeParams, InstrumentProfile, LimitRule
-from zquant.engine.models.bar import MinimalBar
-from zquant.engine.models.fee import FeeModel
-from zquant.engine.models.fill_price import FillModel, PriceBasis
-from zquant.engine.models.liquidity import LiquidityModel
-from zquant.engine.models.slippage import SlippageModel
-from zquant.engine.orderbook import OpenOrderBook
-from zquant.engine.orders import (
+from mtzquant.core.errors import MtzQuantError
+from mtzquant.core.types import InstrumentType
+from mtzquant.engine.account import Account, Position
+from mtzquant.engine.broker import BrokerSim, MatchingModels
+from mtzquant.engine.instrument import Board, FeeParams, InstrumentProfile, LimitRule
+from mtzquant.engine.models.bar import MinimalBar
+from mtzquant.engine.models.fee import FeeModel
+from mtzquant.engine.models.fill_price import FillModel, PriceBasis
+from mtzquant.engine.models.liquidity import LiquidityModel
+from mtzquant.engine.models.slippage import SlippageModel
+from mtzquant.engine.orderbook import OpenOrderBook
+from mtzquant.engine.orders import (
     Fill,
     Order,
     OrderDirection,
@@ -193,7 +193,7 @@ class DailyDriver:
     def on_day(self, day_index: int, action: Callable[[], None]) -> None:
         """按索引（0-based，相对首个交易日）预约 15:00 动作。"""
         if day_index < 0 or day_index >= len(self.sessions):
-            raise ZQuantError(f"day_index {day_index} 超出日历", stage="golden_daily")
+            raise MtzQuantError(f"day_index {day_index} 超出日历", stage="golden_daily")
         self.on(self.sessions[day_index].bar.date, action)
 
     def on_day_open(self, date: str, action: Callable[[], None]) -> None:
@@ -436,7 +436,7 @@ class DailyDriver:
             if diff > 0:
                 return self._lot_floor(code, diff / self._px(code))
             return -self._lot_floor(code, abs(diff) / self._px(code))
-        raise ZQuantError(f"未支持风格 {style}", stage="golden_daily")
+        raise MtzQuantError(f"未支持风格 {style}", stage="golden_daily")
 
     def _held(self, code: str) -> float:
         pos = self.account.positions.get(code)
@@ -492,9 +492,9 @@ class DailyDriver:
         触发懒加载（load_count 计数），再次访问命中缓存不重复解析。
         """
         if code not in self.data:
-            raise ZQuantError(f"{code} 无行情数据", stage="golden_daily")
+            raise MtzQuantError(f"{code} 无行情数据", stage="golden_daily")
         if self._universe and code not in self._universe:
-            raise ZQuantError(f"{code} 不在动态 universe 中", stage="golden_daily")
+            raise MtzQuantError(f"{code} 不在动态 universe 中", stage="golden_daily")
         cut = as_of or self._current_date or ""
         # 盘前相位：当日 bar 不可见 → cutoff 取前一交易日（4.7 时点①/g10）
         if not as_of and self._phase == "before_open" and self._current_date:
@@ -663,7 +663,7 @@ class DailyDriver:
         try:
             return self.data[code][date]
         except KeyError:
-            raise ZQuantError(f"缺数据 {code} @ {date}", stage="golden_daily") from None
+            raise MtzQuantError(f"缺数据 {code} @ {date}", stage="golden_daily") from None
 
     def _build_snapshot(self) -> RunSnapshot:
         status = self.status
