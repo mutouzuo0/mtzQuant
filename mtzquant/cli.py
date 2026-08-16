@@ -69,6 +69,32 @@ def _print_json(obj: Any) -> None:
     print(json.dumps(obj, ensure_ascii=False, indent=2))
 
 
+def _now_ms() -> int:
+    """整数毫秒时间戳（8.8; WS 展示用）。"""
+    import time as _t
+
+    return int(_t.time() * 1000)
+
+
+def _stream_emit(envelope: dict[str, Any]) -> None:
+    """实时事件流输出（M4-W1, 6.3 信封 JSON 行到 stdout; 父进程逐行消费）。"""
+    print(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")), flush=True)
+
+
+def _stream_publish_hook(rec: Any) -> None:
+    """ResultStore 实时事件 → 6.3 信封 JSON 行（committed:false 即时发, 8.7 与落库解耦）。"""
+    _stream_emit(
+        {
+            "type": rec.kind,
+            "run_id": rec.run_id,
+            "ts": rec.ts,
+            "event_seq": rec.event_seq,
+            "committed": rec.committed,
+            "data": rec.payload,
+        }
+    )
+
+
 # ============================================================
 # 异常输出（结构化 → 彩色 / 机读, 10.5）
 # ============================================================
@@ -197,7 +223,7 @@ def config_check() -> None:
 
 
 # ============================================================
-# run（阶段 I: 会话+引擎+导出+入库; --isolate 子进程隔离）
+# run（阶段 I: 会话+引擎+导出+入库; --isolate 子进程隔离; --stream 实时事件流）
 # ============================================================
 @app.command()
 def run(
@@ -207,6 +233,21 @@ def run(
     timeout: Annotated[
         float | None, typer.Option("--timeout", help="隔离超时秒数（默认 1h）")
     ] = None,
+    stream: Annotated[
+        bool,
+        typer.Option(
+            "--stream",
+            help="实时事件流模式（M4-W1, 6.3）: 6.3 信封 JSON 行输出到 stdout; 供 serve 子进程消费",
+        ),
+    ] = False,
+    control: Annotated[
+        str | None,
+        typer.Option("--control", help="控制文件路径（M4-W2, 6.4）: pause/stop 同权控制"),
+    ] = None,
+    run_id: Annotated[
+        str | None,
+        typer.Option("--run-id", help="run_id 覆盖（serve 会话管理预生成, M4-W2）"),
+    ] = None,
 ) -> None:
     """运行一次回测（会话装配 → 引擎驱动 → 导出 → DB 入库）。"""
     if isolate:
@@ -215,7 +256,14 @@ def run(
     try:
         task = _load_task(config, json_out=json_out)
         settings = load_settings()
-        result = run_task(task, settings=settings)
+        publish_hook = _stream_publish_hook if stream else None
+        result = run_task(
+            task,
+            settings=settings,
+            publish_hook=publish_hook,
+            control_path=control,
+            run_id=run_id,
+        )
     except (typer.Exit, typer.BadParameter):
         raise  # _load_task/_emit_error 已输出结构化错误并置退出码
     except MtzQuantError as exc:
@@ -223,6 +271,19 @@ def run(
     except Exception as exc:  # noqa: BLE001
         _emit_error(exc, json_out=json_out)
 
+    if stream:
+        # 流式收尾: committed 轻量确认（W5: 全部事件已落库; 6.3 信封）
+        _stream_emit(
+            {
+                "type": "committed",
+                "run_id": result.run_id,
+                "ts": _now_ms(),
+                "event_seq": 0,
+                "committed": True,
+                "data": {"status": result.status, "run_id": result.run_id},
+            }
+        )
+        return
     if json_out:
         summary = {
             "run_id": result.run_id,

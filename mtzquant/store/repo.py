@@ -30,6 +30,7 @@ from mtzquant.store.models import (
     Fill,
     Order,
     OrderEvent,
+    RunEventJournal,
     RunManifest,
     StrategySnapshot,
 )
@@ -91,8 +92,23 @@ class RunRepo:
         mtzquant_version: str = "",
         parent_run_id: str | None = None,
     ) -> BacktestRun:
-        """创建 run（params_json 必须已脱敏, 3.6/8.3.1）。"""
+        """创建 run（params_json 必须已脱敏, 3.6/8.3.1）。
+
+        M4-W2: 已存在（serve 预建 running 行）→ 覆写终态字段（upsert 语义, 8.3.1）。
+        """
         with Session(self.engine, expire_on_commit=False) as s:
+            existing = s.get(BacktestRun, run_id)
+            if existing is not None:
+                existing.task_name = task_name
+                existing.platform = platform
+                existing.strategy_snapshot_id = snapshot_id
+                existing.parent_run_id = parent_run_id
+                existing.params_json = params_json
+                existing.status = status
+                existing.manifest_hash = manifest_hash
+                existing.mtzquant_version = mtzquant_version
+                s.commit()
+                return existing
             run = BacktestRun(
                 id=run_id,
                 task_name=task_name,
@@ -369,3 +385,43 @@ class DetailRepo:
             s.execute(insert(BacktestDailyNav), [dict(r) for r in rows])
             s.commit()
         return len(rows)
+
+    def insert_journal(self, rows: Sequence[dict[str, Any]]) -> int:
+        """事件日志批量写入（M4-W3, 8.3.7; (run_id,event_seq) 幂等 upsert 语义）。"""
+        if not rows:
+            return 0
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        with Session(self.engine, expire_on_commit=False) as s:
+            for r in rows:
+                s.execute(
+                    sqlite_insert(RunEventJournal)
+                    .values(**r)
+                    .on_conflict_do_nothing(index_elements=["run_id", "event_seq"])
+                )
+            s.commit()
+        return len(rows)
+
+    def journal(
+        self, run_id: str, after_seq: int = 0, limit: int = 100_000
+    ) -> list[dict[str, Any]]:
+        """读取事件日志（按 event_seq 升序; after_seq 断点续传, M4-W3 resume 补帧）。"""
+        with Session(self.engine, expire_on_commit=False) as s:
+            rows = s.execute(
+                select(RunEventJournal)
+                .where(RunEventJournal.run_id == run_id)
+                .where(RunEventJournal.event_seq > after_seq)
+                .order_by(RunEventJournal.event_seq)
+                .limit(limit)
+            ).scalars()
+            return [
+                {
+                    "type": r.kind,
+                    "run_id": r.run_id,
+                    "ts": r.ts,
+                    "event_seq": r.event_seq,
+                    "committed": r.committed,
+                    "data": json.loads(r.payload_json),
+                }
+                for r in rows
+            ]

@@ -135,16 +135,27 @@ def run_serve(
     port: int = 8501,
     settings: Settings | None = None,
 ) -> None:
-    """`mtzquant serve`: 装配 runtime（可选 --with-task 启动回测）+ 起 uvicorn（仅本地可信）。"""
+    """`mtzquant serve`: M4 Web 模式——会话管理器强制子进程（D1）+ 起 uvicorn。
+
+    --with-task 任务经管理器 submit（子进程跑, WS 实时流; 三调用面同权, 10.1）。
+    """
     from mtzquant.server.app import create_app
+    from mtzquant.server.sessions import BacktestSessionManager
 
     settings = settings or load_settings()
-    runtime: BacktestRuntime | None = None
+    manager = BacktestSessionManager(settings, out_root="results")
     if with_task:
         task = load_task(with_task)
-        runtime = BacktestRuntime(task, settings=settings)
-        runtime.start()
-    app = create_app(runtime)
+        manager.submit(json.loads(task.model_dump_json()))
+    app = create_app(manager=manager, settings=settings)
+    # D4/§8: 非本机绑定且认证关闭 → 启动警告（分享场景强制建议开启认证）
+    if host not in ("127.0.0.1", "localhost") and not settings.server.auth_enabled:
+        from rich.console import Console
+
+        Console().print(
+            "[yellow]⚠ 非本机绑定且认证关闭（server.auth_enabled=false）——"
+            "分享/非 tailnet 场景请开启认证（secrets server.tokens）[/yellow]"
+        )
     import uvicorn
 
     uvicorn.run(app, host=host, port=port, log_level="warning")

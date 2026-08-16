@@ -210,6 +210,28 @@ class BacktestDailyNav(Base):
     open_positions: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class RunEventJournal(Base):
+    """回测事件日志（append-only, 8.3.7, M4-W3）——WS 断线补帧/逐日回放的唯一数据源。
+
+    与 ResultStore 信封同构（6.3: kind/run_id/event_seq/committed/ts/payload）;
+    (run_id, event_seq) 唯一; 由 run_task 的 flush 钩子批量写入（8.7 写缓冲）。
+    """
+
+    __tablename__ = "run_event_journal"
+    __table_args__ = (
+        UniqueConstraint("run_id", "event_seq", name="uq_journal_run_seq"),
+        Index("ix_journal_run", "run_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    event_seq: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32))
+    committed: Mapped[bool] = mapped_column(default=False)
+    ts: Mapped[int] = mapped_column(Integer, default=0)  # 发布毫秒时间戳（8.8）
+    payload_json: Mapped[str] = mapped_column(Text)
+
+
 # ------------------------------------------------------------------
 # 初始化 / 连接
 # ------------------------------------------------------------------

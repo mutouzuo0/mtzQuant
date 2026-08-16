@@ -126,10 +126,14 @@ def run_task(
     run_id: str | None = None,
     persist: bool = True,
     parent_run_id: str | None = None,
+    publish_hook: Any | None = None,
+    control_path: Path | str | None = None,
 ) -> RunResult:
     """执行一次回测（装配 → 驱动 → 导出 → 入库）。
 
     parent_run_id（P2 rerun 谱系）: 新 run 记录指向原 run（10.3 lineage 用）。
+    publish_hook（M4-W1, 6.3）: ResultStore 实时事件钩子（WS 流式, committed:false 即时发）;
+    control_path（M4-W2, 6.4）: 控制文件路径（Web/CLI pause/stop 同权）。
     """
     t0 = time.perf_counter()
     pipeline = build_pipeline(settings, task.universe)
@@ -150,14 +154,44 @@ def run_task(
     if parent_run_id is None:
         parent_run_id = (task_dict.get("engine") or {}).get("parent_run_id")
 
-    # ResultStore 事件流（journal-first, 5.6; flush 钩子=明细入库, 8.7）
+    # ResultStore 事件流（journal-first 5.6; flush=明细+事件日志 8.7; publish=实时流 6.3）
     result_store = ResultStore(
         FlushPolicy(
             batch_size=settings.database.batch_size,
             flush_interval_ms=settings.database.batch_flush_interval_ms,
             buffer_max_rows=settings.database.buffer_max_rows,
-        )
+        ),
+        run_id=run_id,
+        publish_hook=publish_hook,
     )
+    # M4-W3 事件日志（run_event_journal, 8.3.7）: persist 时提前开库, flush 钩子批量写
+    db: Engine | None = None
+    detail: DetailRepo | None = None
+    if persist:
+        try:
+            db = init_db(db_url or settings.database.url)
+            detail = DetailRepo(db)
+
+            def _journal_flush(batch: Any) -> None:
+                assert detail is not None
+                detail.insert_journal(
+                    [
+                        {
+                            "run_id": r.run_id,
+                            "event_seq": r.event_seq,
+                            "kind": r.kind,
+                            "committed": r.committed,
+                            "ts": r.ts,
+                            "payload_json": json.dumps(r.payload, ensure_ascii=False),
+                        }
+                        for r in batch
+                    ]
+                )
+
+            result_store._flush_hook = _journal_flush  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 - 日志落库失败不阻断回测（journal 为增强, 8.7）
+            db = None
+            detail = None
 
     session = BacktestSession(
         task,
@@ -169,7 +203,11 @@ def run_task(
         max_participation=settings.engine.max_participation,
         result_store=result_store,
     )
-    engine = UnifiedBacktestEngine(session, broker=session.broker)
+    engine = UnifiedBacktestEngine(
+        session,
+        broker=session.broker,
+        control_refresh=_make_control_refresh(control_path),
+    )
     try:
         snapshot = engine.run()
     except MtzQuantError:
@@ -211,12 +249,12 @@ def run_task(
     out_dir = store.export(bundle)
     t_export = time.perf_counter()
 
-    db: Engine | None = None
+    db2: Engine | None = None
     error_log: str | None = None
     if persist:
         try:
-            db = init_db(db_url or settings.database.url)
-            persist_run(db, bundle, manifest, manifest_hash, parent_run_id=parent_run_id)
+            db2 = db if db is not None else init_db(db_url or settings.database.url)
+            persist_run(db2, bundle, manifest, manifest_hash, parent_run_id=parent_run_id)
         except Exception as exc:  # noqa: BLE001 - 入库失败不阻断导出（结果已落盘, 9.1）
             error_log = f"{type(exc).__name__}: {exc}"
     t_persist = time.perf_counter()
@@ -410,3 +448,33 @@ def _settings_fees(settings: Settings):
         stamp_tax_rate=f.stamp_tax_rate,
         transfer_fee_rate=f.transfer_fee_rate,
     )
+
+
+def _make_control_refresh(control_path: Path | str | None) -> Any | None:
+    """M4-W2 控制文件刷新（6.4）: 每 bar 边界读取 pause/stop 控制。
+
+    pause → 原地阻塞轮询直到恢复（保持回测位置不跳步）; stop → 置停旗, 引擎收尾。
+    文件缺失/损坏 → 视为无控制（可恢复, 不阻断回测）。
+    """
+
+    if control_path is None:
+        return None
+    path = Path(control_path)
+
+    def _read() -> dict[str, Any]:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _refresh(control: Any) -> None:
+        data = _read()
+        control.pause_requested = bool(data.get("pause"))
+        control.stop_requested = bool(data.get("stop"))
+        while control.pause_requested and not control.stop_requested:
+            time.sleep(0.2)
+            data = _read()
+            control.pause_requested = bool(data.get("pause"))
+            control.stop_requested = bool(data.get("stop"))
+
+    return _refresh

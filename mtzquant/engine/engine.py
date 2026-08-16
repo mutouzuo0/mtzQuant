@@ -82,7 +82,13 @@ class SessionPort(Protocol):
 class UnifiedBacktestEngine:
     """统一回测引擎（设计 5.1 十阶段）。"""
 
-    def __init__(self, session: SessionPort, *, broker: BrokerSim | None = None) -> None:
+    def __init__(
+        self,
+        session: SessionPort,
+        *,
+        broker: BrokerSim | None = None,
+        control_refresh: Any | None = None,
+    ) -> None:
         self.session = session
         self.broker = broker or BrokerSim()
         # 待撮合账本与会话共享同一实例（orders_to_book 受理 → 此处撮合, 5.3.1）;
@@ -91,6 +97,7 @@ class UnifiedBacktestEngine:
         if self.order_book is None:
             self.order_book = OpenOrderBook()
         self.control = ControlSignal()
+        self._control_refresh = control_refresh  # M4-W2: 每日外部控制刷新（pause/stop 文件, 6.4）
         self.trace = StageTrace()
         self.degradations: list[str] = []
         self.status = "completed_exact"
@@ -104,6 +111,9 @@ class UnifiedBacktestEngine:
         self._t0 = _time.monotonic()
         try:
             for idx, dt in enumerate(days):
+                if self._control_refresh is not None:
+                    # M4: 外部控制（Web/CLI pause/stop 同权, 6.4）——pause 原地阻塞等待
+                    self._control_refresh(self.control)
                 if self.control.stop_requested:
                     self.status = "stopped"
                     break

@@ -129,12 +129,23 @@ class OptimizerSettings(BaseModel):
     mode_defaults: tuple[str, ...] = ("grid", "random")  # bayesian 预留（2.2）
 
 
+class ServerSettings(BaseModel):
+    """Web 服务默认（M4 §5, 7 章引言）。"""
+
+    host: str = "127.0.0.1"
+    port: int = 8501
+    auth_enabled: bool = False  # D4: 默认 false（tailnet 内网场景; 分享必须开启）
+    websocket_push_interval_bars: int = 1  # 分钟推送节流（日线=每交易日一推, 6.1）
+    bandwidth_low_defaults: bool = False
+
+
 class Settings(BaseModel):
     data: DataSettings = Field(default_factory=DataSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     engine: EngineSettings = Field(default_factory=EngineSettings)
     research: ResearchSettings = Field(default_factory=ResearchSettings)
     optimizer: OptimizerSettings = Field(default_factory=OptimizerSettings)
+    server: ServerSettings = Field(default_factory=ServerSettings)
 
 
 # ------------------------------------------------------------------
