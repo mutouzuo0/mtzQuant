@@ -1,17 +1,30 @@
 /* mtzQuant Web 页面逻辑（M4-X, 原生 JS 无构建链, 9.1: 数据一律来自 REST/DB 同源） */
 "use strict";
 
+// Y1 认证: token 存 localStorage（13.5）; 401 时提示录入（Watcher/Operator 同权校验）
+const TOKEN_KEY = "mtzquant_token";
+function apiHeaders() {
+  const t = localStorage.getItem(TOKEN_KEY);
+  return t ? { "Content-Type": "application/json", "Authorization": "Bearer " + t } : { "Content-Type": "application/json" };
+}
+
 const API = {
-  async get(path) {
-    const r = await fetch(path);
+  async _req(path, opts) {
+    const r = await fetch(path, opts);
+    if (r.status === 401) {
+      const t = window.prompt("需要认证 token（secrets server.tokens, 13.5）:");
+      if (t) {
+        localStorage.setItem(TOKEN_KEY, t.trim());
+        return this._req(path, opts);
+      }
+    }
     if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || r.status); }
     return r.json();
   },
+  async get(path) { return this._req(path, { headers: apiHeaders() }); },
   async post(path, body) {
-    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
+    return this._req(path, { method: "POST", headers: apiHeaders(),
       body: body ? JSON.stringify(body) : undefined });
-    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.detail || r.status); }
-    return r.json();
   }
 };
 
@@ -140,6 +153,26 @@ window.mtzData = {
   }
 };
 
+/* ==================== 参数扫描进度（M4-Z2） ==================== */
+window.mtzScan = {
+  async load() {
+    const msg = document.getElementById("scanMsg");
+    try {
+      const j = await API.get("/api/queue");
+      msg.textContent = `完成 ${j.done} / ${j.total} · ${j.total ? Math.round(j.done/j.total*100) : 0}%`;
+      const tb = document.querySelector("#scanTable tbody");
+      tb.innerHTML = (j.results||[]).map(r => `<tr>
+        <td>${esc(JSON.stringify(r.params))}</td>
+        <td>${esc((r.run_id||"").slice(0,16))}</td>
+        <td class="num">${r.sharpe==null?"—":Number(r.sharpe).toFixed(4)}</td>
+        <td>${esc(r.status)}</td></tr>`).join("");
+    } catch (e) {
+      const tb = document.querySelector("#scanTable tbody");
+      tb.innerHTML = `<tr><td colspan="4">✘ ${esc(e.message)}</td></tr>`;
+    }
+  }
+};
+
 document.addEventListener("DOMContentLoaded", () => {
   const b1 = document.getElementById("btnLoadTask");
   const b2 = document.getElementById("btnSubmit");
@@ -147,10 +180,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const b4 = document.getElementById("btnCompare");
   const b5 = document.getElementById("btnCoverage");
   const b6 = document.getElementById("btnDownload");
+  const b7 = document.getElementById("btnRefreshScan");
   if (b1) b1.onclick = () => mtzNew.loadTask();
   if (b2) b2.onclick = () => mtzNew.submit();
   if (b3) b3.onclick = () => mtzHistory.load();
   if (b4) b4.onclick = () => mtzHistory.compare();
   if (b5) b5.onclick = () => mtzData.fetchData(false);
   if (b6) b6.onclick = () => mtzData.fetchData(true);
+  if (b7) b7.onclick = () => mtzScan.load();
 });

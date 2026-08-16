@@ -61,10 +61,11 @@ _FORBIDDEN_KEYWORDS = (
 # - ohlc_out_of_bounds: high<max(open,close) / low>min(open,close) / high<low
 # - duplicate_dates: trade_date 重复行
 # - parse_fail: trade_date 无法按 %Y%m%d 解析
+# 注: read_csv_auto 会把 YYYYMMDD 推断为 BIGINT → 日期函数须 CAST AS VARCHAR
 QUALITY_CHECKS: dict[str, str] = {
     "missing_weekday": """
         WITH src AS (
-            SELECT STRPTIME(trade_date, '%Y%m%d')::DATE AS d
+            SELECT STRPTIME(CAST(trade_date AS VARCHAR), '%Y%m%d')::DATE AS d
             FROM read_csv_auto('{path}', header=true, sample_size=100000)
         ),
         span AS (SELECT MIN(d) AS lo, MAX(d) AS hi FROM src),
@@ -102,7 +103,7 @@ QUALITY_CHECKS: dict[str, str] = {
     "parse_fail": """
         SELECT trade_date
         FROM read_csv_auto('{path}', header=true, sample_size=100000)
-        WHERE TRY_STRPTIME(trade_date, '%Y%m%d') IS NULL
+        WHERE TRY_STRPTIME(CAST(trade_date AS VARCHAR), '%Y%m%d') IS NULL
         ORDER BY trade_date
         """,
 }

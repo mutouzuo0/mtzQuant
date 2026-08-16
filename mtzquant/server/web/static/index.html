@@ -64,6 +64,7 @@
     <a href="#/monitor" data-nav="monitor">监控</a>
     <a href="#/new" data-nav="new">新建回测</a>
     <a href="#/history" data-nav="history">历史</a>
+    <a href="#/scan" data-nav="scan">扫描</a>
     <a href="#/data" data-nav="data">数据下载</a>
     <a href="#/help" data-nav="help">帮助</a>
   </nav>
@@ -164,6 +165,20 @@
       <span id="dlMsg" class="muted"></span>
     </div>
     <table id="dlTable"><thead><tr><th>代码</th><th>状态</th><th>新增</th><th>区间</th><th>说明</th></tr></thead><tbody></tbody></table>
+  </div>
+</div>
+
+<!-- ==================== 参数扫描进度页（M4-Z2） ==================== -->
+<div id="page-scan" class="page">
+  <div class="row">
+    <button id="btnRefreshScan">刷新</button>
+    <span id="scanMsg" class="muted">—</span>
+  </div>
+  <div class="card">
+    <h2>参数扫描队列（BacktestQueue, 10.4）</h2>
+    <table id="scanTable"><thead><tr>
+      <th>参数</th><th>run_id</th><th>夏普</th><th>状态</th>
+    </tr></thead><tbody></tbody></table>
   </div>
 </div>
 
@@ -336,6 +351,7 @@ function route(){
   if(el) el.classList.add("active");
   document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("active", a.dataset.nav===page));
   if(page==="history") window.mtzHistory && mtzHistory.load();
+  if(page==="scan") window.mtzScan && mtzScan.load();
   if(page==="monitor" && !ws) connectWS();
 }
 window.addEventListener("hashchange", route);

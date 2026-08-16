@@ -264,26 +264,23 @@ def create_app(
 
     @app.get("/api/health")
     async def health(dep: None = Depends(_require_any)) -> dict[str, Any]:
-        """3.10/7.7 数据体检（Z1 成品化; 此处返回覆盖摘要骨架）。"""
-        from mtzquant.data.coverage import CoverageChecker
+        """3.10/7.7 数据体检（M4-Z1 成品化: DuckDB 全库扫描）。"""
+        from mtzquant.data.health import scan_health
 
         root = Path(settings.data.local_csv.root_path)
-        kline = root / "kline"
-        codes: list[str] = []
-        if kline.is_dir():
-            for t in ("etf", "stock"):
-                d = kline / t / "day"
-                if d.is_dir():
-                    codes += [f.stem for f in sorted(d.glob("*.csv"))]
-        covs = [
-            CoverageChecker(root, instrument_type="etf").coverage(c) for c in sorted(codes)[:500]
-        ]
+        report = scan_health(root)
+        return report.to_dict()
+
+    @app.get("/api/queue")
+    async def queue_status(dep: None = Depends(_require_any)) -> dict[str, Any]:
+        """参数扫描队列状态（M4-Z2）: BacktestQueue 进度 + Top 汇总（M3 衔接）。"""
+        from mtzquant.optimize.queue import BacktestQueue
+
+        q = BacktestQueue()  # 默认 state_dir=.cache/queue（queue_state.json 中断恢复）
         return {
-            "instruments": len(codes),
-            "coverage": [
-                {"code": c.code, "count": c.count, "min": _d(c.min_dt), "max": _d(c.max_dt)}
-                for c in covs
-            ],
+            "done": q.done_count(),
+            "total": len(q.state.tasks),
+            "results": q.results(),
         }
 
     # ------------------------------------------------------------------

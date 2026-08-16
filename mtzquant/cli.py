@@ -421,9 +421,7 @@ def list_runs(
     try:
         settings = load_settings()
         repo = RunRepo(init_db(settings.database.url))
-        runs = repo.list_runs(
-            sort_by=sort, limit=limit, include_eliminated=include_eliminated
-        )
+        runs = repo.list_runs(sort_by=sort, limit=limit, include_eliminated=include_eliminated)
     except (typer.Exit, typer.BadParameter):
         raise
     except MtzQuantError as exc:
@@ -482,6 +480,9 @@ def report(
         str | None,
         typer.Option("--friction", help="并入摩擦归因报告路径（friction_report.json, M3-V3）"),
     ] = None,
+    open_browser: Annotated[
+        bool, typer.Option("--open", help="本地起临时 HTTP 服务渲染报告（M4-Z3）")
+    ] = False,
     json_out: Annotated[bool, typer.Option("--json", help="机读输出")] = False,
 ) -> None:
     """生成自包含 report.html（指标卡/语义保真/净值+回撤/成交表/可选摩擦归因章节）。"""
@@ -497,6 +498,35 @@ def report(
         _print_json({"run_id": run_id, "report": str(path)})
     else:
         console.print(f"[green]✔[/green] 报告已生成: [cyan]{path}[/cyan]")
+    if open_browser:
+        _open_report(path)
+
+
+def _open_report(path: Path) -> None:
+    """本地临时 HTTP 服务渲染 report.html（M4-Z3, 三面同权收口）。"""
+    import threading
+    import webbrowser
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+    root = path.parent
+
+    class _Handler(SimpleHTTPRequestHandler):
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            super().__init__(*a, directory=str(root), **kw)
+
+        def log_message(self, *_: Any) -> None:  # noqa: ANN002
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    port = server.server_address[1]
+    url = f"http://127.0.0.1:{port}/{path.name}"
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    console.print(f"[dim]本地渲染: {url}（Ctrl+C 退出）[/dim]")
+    webbrowser.open(url)
+    try:
+        threading.Event().wait()  # 阻塞直至 Ctrl+C
+    except KeyboardInterrupt:
+        server.shutdown()
 
 
 # ============================================================
@@ -1181,6 +1211,98 @@ def serve(
     from mtzquant.server.run_local import run_serve
 
     run_serve(with_task=with_task, host=host, port=port)
+
+
+# ============================================================
+# health（M4-Z1, 3.10/7.7）: 数据体检（DuckDB 全库扫描）
+# ============================================================
+@app.command()
+def health(
+    json_out: Annotated[bool, typer.Option("--json", help="机读输出")] = False,
+) -> None:
+    """数据体检: DuckDB 全库扫描（覆盖区间/缺失/0价0量/OHLC越界/重复dt, 3.10/7.7）。"""
+    from mtzquant.data.health import scan_health
+
+    try:
+        settings = load_settings()
+        report = scan_health(Path(settings.data.local_csv.root_path))
+    except (typer.Exit, typer.BadParameter):
+        raise
+    except MtzQuantError as exc:
+        _emit_error(exc, json_out=json_out)
+        return
+    except Exception as exc:  # noqa: BLE001
+        _emit_error(exc, json_out=json_out)
+        return
+    if json_out:
+        _print_json(report.to_dict())
+        return
+    console.print(f"[bold]数据体检[/bold] · {report.total} 标的 · {report.issue_count} 项异常")
+    table = Table(title="数据体检（3.10/7.7）")
+    table.add_column("代码")
+    table.add_column("行数")
+    table.add_column("区间")
+    table.add_column("异常")
+    for h in report.instruments[:100]:
+        issues = ", ".join(f"{k}({v.get('n', '?')})" for k, v in h.checks.items())
+        table.add_row(h.code, str(h.count), f"{h.min_date} ~ {h.max_date}", issues or "—")
+    console.print(table)
+
+
+# ============================================================
+# remote（M4-Y3, 13 章）: 远程访问配套（tailscale 检测 + 其余手动指引）
+# ============================================================
+@app.command()
+def remote(
+    provider: Annotated[
+        str, typer.Option("--provider", help="provider: tailscale|cloudflare|ngrok|frp")
+    ] = "tailscale",
+    json_out: Annotated[bool, typer.Option("--json", help="机读输出")] = False,
+) -> None:
+    """远程访问配套（13.5）: tailscale 检测 + 访问地址提示; 其余打印手动指引。"""
+    import shutil
+
+    if provider == "tailscale":
+        ts = shutil.which("tailscale")
+        if ts is None:
+            if json_out:
+                _print_json({"provider": "tailscale", "installed": False})
+                raise typer.Exit(code=1)
+            console.print(
+                "[red]✘ 未检测到 tailscale 客户端[/red]\n"
+                "  安装: https://tailscale.com/download（主方案, 13.5）"
+            )
+            raise typer.Exit(code=1)
+        console.print("[green]✔[/green] 已检测到 tailscale 客户端")
+        # MagicDNS 地址: tailscale ip -4
+        import subprocess
+
+        hostname = "mtzquant-server"
+        try:
+            out = subprocess.run([ts, "ip", "-4"], capture_output=True, text=True, timeout=10)
+            ip = (out.stdout or "").strip().splitlines() or ["<未登录/未在线>"]
+        except Exception:  # noqa: BLE001
+            ip = ["<未登录/未在线>"]
+        console.print(
+            f"  MagicDNS 建议: [cyan]{hostname}[/cyan]（或 IP {ip[0]}）\n"
+            "  启动服务: `mtzquant serve --host 0.0.0.0 --port 8501`\n"
+            "  分享前请开启认证（settings.server.auth_enabled + secrets server.tokens, 13.5）"
+        )
+        if json_out:
+            _print_json({"provider": "tailscale", "installed": True, "ips": list(ip)})
+        return
+    guidance = {
+        "cloudflare": (
+            "Cloudflare Tunnel: `cloudflared tunnel --url "
+            "http://127.0.0.1:8501`（需 cloudflared 已装）"
+        ),
+        "ngrok": "ngrok: `ngrok http 8501`（需 ngrok 已装）",
+        "frp": "frp: 配置 frps/frpc 将 8501 转发到公网（需自建 frp 服务）",
+    }
+    console.print(f"[yellow]{provider}[/yellow] 手动指引（M4 不自动安装隧道软件, 13.4）:")
+    console.print(f"  {guidance.get(provider, '未知 provider: tailscale|cloudflare|ngrok|frp')}")
+    if json_out:
+        _print_json({"provider": provider, "guidance": guidance.get(provider, "")})
 
 
 if __name__ == "__main__":
