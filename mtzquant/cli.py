@@ -302,6 +302,153 @@ def run(
         _print_run_summary(result)
 
 
+# ============================================================
+# backtest（一键回测）: 检测标的 → 数据完整性 → 缺则下载 → 回测 → Web 实时可视地址
+# ============================================================
+@app.command()
+def backtest(
+    config: Annotated[str | None, typer.Option("-c", "--config", help="任务 JSON 路径")] = None,
+    check_only: Annotated[
+        bool,
+        typer.Option(
+            "--check-only",
+            help="只检测数据完整性并报告缺失, 不自动下载（缺省自动下载缺失段）",
+        ),
+    ] = False,
+    open_browser: Annotated[
+        bool,
+        typer.Option(
+            "--open",
+            help="回测后后台拉起 serve 并打开浏览器（Web 地址即时可用, best-effort）",
+        ),
+    ] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="机读输出")] = False,
+) -> None:
+    """一键回测: 检测策略标的 → 校验区间数据完整性（缺则下载）→ 回测 → 给出 Web 可视地址。
+
+    标的来源: 任务 universe ∪ 策略源码检测 ∪ 基准; 缺失数据经 DataFetcher 只下缺失段。
+    """
+    from datetime import date
+
+    from mtzquant.engine.preflight import (
+        detect_codes,
+        ensure_data,
+        required_codes,
+        web_url,
+    )
+
+    try:
+        task = _load_task(config, json_out=json_out)
+        settings = load_settings()
+        strategy_path = Path(task.strategy.file)
+        if not strategy_path.is_file():
+            raise MtzQuantError(
+                f"策略文件不存在: {strategy_path}", stage="backtest", hint="task.strategy.file"
+            )
+        source = strategy_path.read_text(encoding="utf-8")
+
+        # 1) 检测标的 + 2) 数据完整性 + 3) 缺则下载
+        detected = detect_codes(source)
+        codes = required_codes(task, strategy_source=source)
+        start = date.fromisoformat(task.backtest.start)
+        end = date.fromisoformat(task.backtest.end)
+        report = ensure_data(settings, codes, start, end, auto_fetch=not check_only)
+
+        # 检测代码 ⊄ task.universe → 并入（保证 build_pipeline 预载全量, 3.12-④）
+        patched = bool(set(detected) - set(required_codes(task)))
+        if patched:
+            from mtzquant.engine.session import normalize_universe
+
+            task.universe = sorted(set(normalize_universe(task.universe)) | set(detected))
+
+        # 4) 回测
+        result = run_task(task, settings=settings)
+        url = web_url(result.run_id, settings)
+    except (typer.Exit, typer.BadParameter):
+        raise
+    except MtzQuantError as exc:
+        _emit_error(exc, json_out=json_out)
+        return
+    except Exception as exc:  # noqa: BLE001
+        _emit_error(exc, json_out=json_out)
+        return
+
+    if json_out:
+        _print_json(
+            {
+                "detected_codes": detected,
+                "required_codes": codes,
+                "universe_patched": patched,
+                "preflight": report.to_dict(),
+                "run_id": result.run_id,
+                "status": result.status,
+                "url": url,
+            }
+        )
+        return
+    _print_preflight(report, detected, patched, check_only)
+    _print_run_summary(result)
+    console.print(
+        f"\n[green]✔[/green] Web 实时可视: [cyan]{url}[/cyan]"
+        + (
+            "（已在后台拉起 serve 并打开浏览器）"
+            if open_browser
+            else "（运行 mtzquant serve 后可用）"
+        )
+    )
+    if open_browser:
+        _open_serve_and_browser(url, settings)
+
+
+def _print_preflight(report: Any, detected: list[str], patched: bool, check_only: bool) -> None:
+    """预检结果输出（标的/完整性/下载）。"""
+    console.print(f"[bold]预检[/bold] 检测到 {len(report.codes)} 个标的: {', '.join(report.codes)}")
+    if patched:
+        console.print(
+            f"[yellow]⚠ 策略含任务 universe 之外的标的, 已并入: {', '.join(detected)}[/yellow]"
+        )
+    if report.complete:
+        console.print("[green]✔[/green] 回测区间数据完整, 无需下载")
+        return
+    if check_only:
+        console.print("[yellow]✘ 数据不完整（--check-only, 未下载）:[/yellow]")
+    else:
+        console.print(
+            "[yellow]→ 数据不完整, 已下载缺失段（本次: "
+            f"{', '.join(report.downloaded) or '无'}）[/yellow]"
+        )
+    for code, segs in report.missing.items():
+        console.print(
+            f"  [yellow]{code}[/yellow] 缺失 {len(segs)} 段: "
+            + ", ".join(f"{s}~{e}" for s, e in segs)
+        )
+    if not check_only and not report.missing:
+        console.print("[green]✔[/green] 下载后复检通过")
+
+
+def _open_serve_and_browser(url: str, settings: Any) -> None:
+    """后台拉起 serve 子进程（独立存活）并打开浏览器（best-effort, 不阻断回测流程）。"""
+    import subprocess
+    import sys
+    import webbrowser
+
+    host = settings.server.host or "127.0.0.1"
+    port = settings.server.port or 8501
+    try:
+        subprocess.Popen(
+            [sys.executable, "-m", "mtzquant", "serve", "--host", str(host), "--port", str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except OSError:
+        pass  # best-effort: 端口占用/启动失败则用户自行 serve
+    try:
+        webbrowser.open(url)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _run_isolated(config: str | None, *, json_out: bool, timeout: float | None) -> None:
     """--isolate: 净化环境子进程重跑（T-X03）; 超时进程树终止。"""
     try:
@@ -1204,8 +1351,14 @@ def serve(
         str | None,
         typer.Option("--with-task", help="任务 JSON 路径; 提供则启动回测并实时推送到浏览器"),
     ] = None,
-    host: Annotated[str, typer.Option("--host", help="监听地址（默认仅本地）")] = "127.0.0.1",
-    port: Annotated[int, typer.Option("--port", help="监听端口（M4 规划沿用 8501）")] = 8501,
+    host: Annotated[
+        str | None,
+        typer.Option("--host", help="监听地址（缺省 settings.server.host, 默认 127.0.0.1）"),
+    ] = None,
+    port: Annotated[
+        int | None,
+        typer.Option("--port", help="监听端口（缺省 settings.server.port, 默认 8501）"),
+    ] = None,
 ) -> None:
     """Web 最小可视版: 浏览器实时监控 native 回测（WS 事件流, 6.3 信封）。"""
     from mtzquant.server.run_local import run_serve

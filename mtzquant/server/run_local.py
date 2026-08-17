@@ -131,18 +131,21 @@ def load_task(task_path: str | Path) -> TaskConfig:
 def run_serve(
     *,
     with_task: str | None = None,
-    host: str = "127.0.0.1",
-    port: int = 8501,
+    host: str | None = None,
+    port: int | None = None,
     settings: Settings | None = None,
 ) -> None:
     """`mtzquant serve`: M4 Web 模式——会话管理器强制子进程（D1）+ 起 uvicorn。
 
     --with-task 任务经管理器 submit（子进程跑, WS 实时流; 三调用面同权, 10.1）。
+    host/port 缺省读 settings.server.host/port（与 backtest 打印的 Web 地址一致）。
     """
     from mtzquant.server.app import create_app
     from mtzquant.server.sessions import BacktestSessionManager
 
     settings = settings or load_settings()
+    host = host or settings.server.host or "127.0.0.1"
+    port = port or settings.server.port or 8501
     manager = BacktestSessionManager(settings, out_root="results")
     if with_task:
         task = load_task(with_task)

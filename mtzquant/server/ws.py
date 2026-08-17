@@ -113,8 +113,9 @@ class WsHub:
         client.bandwidth = "low" if bandwidth == "low" else "high"
         with self._lock:
             # 锁内补帧: 与 publish 互斥, 保证「补帧 ∪ 实时」恰好覆盖全量事件（6.3）
+            # last_event_seq=0 时全量回放 journal（回测结束后新开监控页仍可看完整 run）
             replay: list[dict[str, Any]] = []
-            if last_event_seq > 0 and run_id is not None and self._journal_loader is not None:
+            if run_id is not None and self._journal_loader is not None:
                 replay = self._journal_loader(run_id, last_event_seq)
             elif self._store is not None:
                 replay = [envelope(r) for r in self._store.all_records()]
