@@ -524,11 +524,19 @@ function flushChart(){
   if(!chart) return;
   const opt={series:[{data:navSeries},{data:benchSeries}]};
   if(navSeries.length && totalSeries.length){
-    // 右轴=总资产刻度: 与左轴等比锁定（总资产=净值×期初资金）, 同一曲线高度左读净值/右读资产
-    const rng=r=>{const vs=r.map(p=>p[1]);const mn=Math.min(...vs),mx=Math.max(...vs);
-      const p=(mx-mn)*0.05||Math.abs(mx)*0.01||0.01;return [mn-p,mx+p];};
-    const [l0,l1]=rng(navSeries), [r0,r1]=rng(totalSeries);
-    opt.yAxis=[{min:l0,max:l1},{min:r0,max:r1}];
+    // 左轴范围 = 策略 ∪ 基准 两条曲线的最低/最高——只取策略会把低于策略最低点的
+    // 基准段裁掉（下方曲线展示不全的根因）
+    const vs=navSeries.map(p=>p[1]).concat(benchSeries.map(p=>p[1]));
+    const mn=Math.min(...vs), mx=Math.max(...vs);
+    if(isFinite(mn)&&isFinite(mx)){
+      const pad=(mx-mn)*0.05||Math.abs(mx)*0.01||0.01;
+      const l0=mn-pad, l1=mx+pad;
+      // 右轴=总资产刻度: 与左轴等比锁定（总资产=净值×期初资金, k 恒定）,
+      // 同一曲线高度左读净值、右读资产
+      const last=navSeries.length-1;
+      const k=totalSeries[totalSeries.length-1][1]/(navSeries[last][1]||1);
+      opt.yAxis=[{min:l0,max:l1},{min:l0*k,max:l1*k}];
+    }
   }
   chart.setOption(opt);
 }
