@@ -530,13 +530,24 @@ function flushChart(){
     const vs=navSeries.map(p=>p[1]).concat(benchSeries.map(p=>p[1]));
     const mn=Math.min(...vs), mx=Math.max(...vs);
     if(isFinite(mn)&&isFinite(mx)){
-      const pad=(mx-mn)*0.05||Math.abs(mx)*0.01||0.01;
-      const l0=mn-pad, l1=mx+pad;
+      // 范围向外取整到"好刻度"并显式 interval: 非整的原始小数 min/max 会触发
+      // ECharts 额外渲染极值标签(不走 formatter), 长数字被网格边缘裁成 348695/043405 乱码
+      const nice=x=>{const p=Math.pow(10,Math.floor(Math.log10(x||1e-9)));const d=x/p;
+        return (d>=5?10:d>=2?2:1)*p;};
+      const st=nice((mx-mn)/5||Math.abs(mx)*0.02||0.01);
+      const q=(v,dg)=>+(v.toFixed(dg));  // 消除 7×0.1=0.7000000000000001 类浮点尘埃
+      const l0=q(Math.floor(mn/st+1e-9)*st,6), l1=q(Math.ceil(mx/st-1e-9)*st,6);
       // 右轴=总资产刻度: 与左轴等比锁定（总资产=净值×期初资金, k 恒定）,
       // 同一曲线高度左读净值、右读资产
       const last=navSeries.length-1;
       const k=totalSeries[totalSeries.length-1][1]/(navSeries[last][1]||1);
-      opt.yAxis=[{min:l0,max:l1},{min:l0*k,max:l1*k}];
+      const rst=nice(st*k||1);
+      const r0=q(Math.floor(l0*k/rst+1e-9)*rst,0), r1=q(Math.ceil(l1*k/rst-1e-9)*rst,0);
+      opt.yAxis=[
+        {min:l0,max:l1,interval:st,axisLabel:{color:"#8b96b0",formatter:v=>String(+v.toFixed(6))}},
+        {min:r0,max:r1,interval:rst,splitLine:{show:false},axisLabel:{color:"#8b96b0",
+          formatter:v=>v>=10000?(v/10000).toFixed(0)+"万":String(Math.round(v))}}
+      ];
     }
   }
   chart.setOption(opt);
