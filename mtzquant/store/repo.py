@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 03:16:00
-# @update_time        : 2026/08/23 12:00:00
+# @update_time        : 2026/08/23 13:20:00
 # @description : G3 store/repo.py：RunRepo（run 创建/快照复用/软删除/purge）+ DetailRepo（批量插入）
 
 """仓储层（设计 8.3/8.7）——SQL 访问的唯一入口。
@@ -385,6 +385,7 @@ class RunRepo:
                 r[0] for r in s.execute(select(Order.order_id).where(Order.run_id == run_id))
             ]
             s.execute(delete(OrderEvent).where(OrderEvent.run_id == run_id))
+            s.execute(delete(RunEventJournal).where(RunEventJournal.run_id == run_id))
             s.execute(delete(Fill).where(Fill.run_id == run_id))
             s.execute(delete(Order).where(Order.run_id == run_id))
             s.execute(delete(BacktestDailyNav).where(BacktestDailyNav.run_id == run_id))
