@@ -78,4 +78,4 @@ lint-imports              # 模块依赖契约（适配器不得依赖引擎内�
 
 ## License
 
-Proprietary — 仅供个人研究使用。
+[GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.html)（AGPL-3.0，详见 [`LICENSE`](LICENSE)）。
