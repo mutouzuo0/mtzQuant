@@ -227,9 +227,10 @@
     <input id="histSearch" placeholder="搜索任务名" style="width:190px">
     <button id="btnRefreshRuns">刷新</button>
     <button id="btnCompare" class="ok" disabled>对比选中 (0/6)</button>
+    <button id="btnBatchDelete" class="danger" disabled>批量删除</button>
   </div>
   <div class="card">
-    <h2>历史回测（点击表头排序 · 状态筛选 · 勾选 ≤6 个已完成 run 对比）</h2>
+    <h2>历史回测（点击表头排序 · 状态筛选 · 勾选已完成/失败 run：对比或批量删除）</h2>
     <table id="runsTable"><thead><tr>
       <th>☑</th>
       <th data-s="task_name">任务 ⇅</th>

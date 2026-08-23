@@ -1,7 +1,7 @@
 /* coding:utf-8
  * @author      : 木头左
  * @create_time : 2026/08/17 03:20:00
- * @update_time : 2026/08/23 12:59:00
+ * @update_time : 2026/08/23 13:05:00
  * @description : mtzQuant Web 页面逻辑（原生 JS 无构建链, 9.1 数据一律来自 REST/DB 同源）——
  *                连接三态(P1-1)/状态徽章全量(P1-3)/指标缺失原因+补算(P0-2)/覆盖语义(P2-2)/
  *                表单增强(P2-4)/历史监控订阅+报告一键重跑+成交明细(横切)。
@@ -350,9 +350,11 @@ window.mtzHistory = {
       : `<td class="num ${cls}">${v}</td>`;
     // 收益涨跌色（红涨绿跌, 国内习惯）: >0 红 / <0 绿 / 0 或缺失无色
     const retCls = v => v == null ? "" : (v > 0 ? "up" : v < 0 ? "down" : "");
+    // 勾选范围: 已完成 + 失败可勾选（对比/批量删除）; 运行中/已暂停/已终止不可操作
+    const selectable = done || r.status === "error";
     return `<tr>
       <td><input type="checkbox" class="run-check" data-id="${esc(r.run_id)}" data-plat="${esc(r.platform || "")}"
-        ${this._selected.has(r.run_id) ? "checked" : ""} ${done ? "" : 'disabled title="仅已完成的 run 可对比"'}></td>
+        ${this._selected.has(r.run_id) ? "checked" : ""} ${selectable ? "" : 'disabled title="运行中/已暂停/已终止的 run 不可操作"'}></td>
       <td>${esc(r.task_name)}</td>
       <td>${esc(this.PLATFORM_CN[r.platform] || r.platform || "—")}</td>
       <td>${statusBadge(r.status)}</td>
@@ -366,7 +368,7 @@ window.mtzHistory = {
         · <a href="#/monitor?run=${rid}" title="订阅该 run 的实时事件流">监控</a>
         · <a href="#" data-logs="${esc(r.run_id)}" title="查看该 run 运行日志">日志</a>
         · <a href="#" data-source="${esc(r.run_id)}" title="查看该 run 实际运行的策略源码快照">源码</a>
-        · <a href="#" data-del="${esc(r.run_id)}" class="danger" title="软删除该 run 并移除结果产物">删除</a>
+        · <a href="#" data-del="${esc(r.run_id)}" class="danger" title="物理删除该 run（DB 全量记录 + 结果产物, 不可恢复）">删除</a>
       </td>
     </tr>`;
   },
@@ -389,6 +391,8 @@ window.mtzHistory = {
     const b = el("btnCompare");
     b.textContent = `对比选中 (${this._selected.size}/6)`;
     b.disabled = this._selected.size < 2;
+    const bd = el("btnBatchDelete");
+    if (bd) bd.disabled = this._selected.size < 1;
   },
 
   async compare() {
@@ -490,7 +494,7 @@ async function viewSource(runId) {
   }
 }
 async function deleteRun(runId) {
-  if (!confirm(`确定删除该回测？\n${runId}\n（DB 记录软删隐藏 + 移除 results 产物目录, 可重跑复现）`)) return;
+  if (!confirm(`确定物理删除该回测？\n${runId}\n（DB 全量记录 + results 产物目录将被永久清除, 不可恢复）`)) return;
   try {
     await API.del(`/api/runs/${encodeURIComponent(runId)}`);
     toast("✔ 已删除: " + runId);
@@ -498,6 +502,20 @@ async function deleteRun(runId) {
     await window.mtzHistory.load();
   } catch (e) {
     toast("✘ 删除失败: " + e.message, false);
+  }
+}
+
+async function batchDeleteRuns() {
+  const ids = [...window.mtzHistory._selected];
+  if (!ids.length) return;
+  if (!confirm(`确定物理删除选中的 ${ids.length} 个 run？\n${ids.join("\n")}\n\nDB 全量记录 + results 产物目录将被永久清除, 不可恢复！`)) return;
+  try {
+    const j = await API.post("/api/runs/batch-delete", { run_ids: ids });
+    toast(`✔ 已物理删除 ${j.deleted.length} 个 run` + (j.missing.length ? `（${j.missing.length} 个不存在/已删）` : ""));
+    ids.forEach(id => window.mtzHistory._selected.delete(id));
+    await window.mtzHistory.load();
+  } catch (e) {
+    toast("✘ 批量删除失败: " + e.message, false);
   }
 }
 
@@ -619,10 +637,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const b5 = document.getElementById("btnCoverage");
   const b6 = document.getElementById("btnDownload");
   const b7 = document.getElementById("btnRefreshScan");
+  const b8 = document.getElementById("btnBatchDelete");
   if (b1) b1.onclick = () => mtzNew.loadTask();
   if (b2) b2.onclick = () => mtzNew.submit();
   if (b3) b3.onclick = () => mtzHistory.load();
   if (b4) b4.onclick = () => mtzHistory.compare();
+  if (b8) b8.onclick = () => batchDeleteRuns();
   if (b5) b5.onclick = () => mtzData.fetchData(false);
   if (b6) b6.onclick = () => mtzData.fetchData(true);
   if (b7) b7.onclick = () => mtzScan.load();

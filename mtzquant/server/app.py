@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 09:14:00
-# @update_time        : 2026/08/23 12:30:00
+# @update_time        : 2026/08/23 13:05:00
 # @description : M4-W4 FastAPI 应用：REST + WS(event_seq) + 静态页 + 认证（7 章/6.2/6.3/13.5）
 
 """create_app（M4-W4）——在 M2-W0 最小版上扩展（不重写）。
@@ -407,7 +407,10 @@ def create_app(
     async def run_logs(
         run_id: str, limit: int = 2000, dep: None = Depends(_require_any)
     ) -> dict[str, Any]:
-        """该 run 的运行日志（run_event_journal 中 kind=log 事件, 附 error_log; 8.3.7 同源）。"""
+        """该 run 的运行日志（journal 中 log/status/progress/corp_action 事件, 附 error_log）。
+
+        进度(progress)事件并入日志视图——「后台在干什么」逐日可见（M4, 8.3.7 同源）。
+        """
         from mtzquant.store.models import init_db
         from mtzquant.store.repo import DetailRepo, RunRepo
 
@@ -419,15 +422,25 @@ def create_app(
         logs = []
         for e in entries:
             kind = e.get("type")
-            if kind not in ("log", "status"):  # 策略日志 + 生命周期（无日志 run 也有内容）
+            if kind not in ("log", "status", "progress", "corp_action"):
                 continue
             d = e.get("data") or {}
             if kind == "log":
                 level = d.get("level") or d.get("kind") or "info"
                 message = d.get("message") or json.dumps(d, ensure_ascii=False)
-            else:
+            elif kind == "progress":
+                level = "info"
+                message = (
+                    f"进度 {d.get('day_index', '?')}/{d.get('total_days', '?')} "
+                    f"({d.get('trade_date', '')}) {round((d.get('percent') or 0) * 100)}%"
+                    + (f" · 已用 {d.get('elapsed_seconds')}s" if d.get("elapsed_seconds") else "")
+                )
+            elif kind == "status":
                 level = "info"
                 message = f"状态 → {d.get('status') or ''}"
+            else:  # corp_action
+                level = "warn"
+                message = f"公司行为 {d.get('detail') or ''} @ {d.get('ex_date') or ''}"
             logs.append(
                 {
                     "event_seq": e.get("event_seq"),
@@ -442,7 +455,7 @@ def create_app(
 
     @app.delete("/api/runs/{run_id}")
     async def delete_run(run_id: str, dep: None = Depends(_require_operator)) -> dict[str, Any]:
-        """删除 run: 软删 DB 记录 + 移除 results/<run_id> 产物目录（历史隐藏, 可重跑复现）。"""
+        """删除 run: 物理删除 DB 全量记录 + 移除 results/<run_id> 产物目录（永久不可恢复）。"""
         import shutil
 
         if manager is not None and manager.get(run_id) is not None:
@@ -454,9 +467,41 @@ def create_app(
         run = repo.get(run_id)
         if run is None or run.deleted_at is not None:
             raise HTTPException(status_code=404, detail=f"run 不存在: {run_id}")
-        repo.soft_delete(run_id)
+        repo.purge_run(run_id, force=True)
         shutil.rmtree(Path("results") / run_id, ignore_errors=True)
         return {"run_id": run_id, "deleted": True}
+
+    @app.post("/api/runs/batch-delete")
+    async def batch_delete_runs(
+        body: dict[str, Any], dep: None = Depends(_require_operator)
+    ) -> dict[str, Any]:
+        """批量物理删除 run: DB 全量记录 + results 产物目录（永久不可恢复, 历史页「批量删除」）。"""
+        import shutil
+
+        run_ids = [str(x) for x in body.get("run_ids", [])]
+        if not run_ids:
+            raise HTTPException(status_code=400, detail="需要 run_ids")
+        from mtzquant.store.models import init_db
+        from mtzquant.store.repo import RunRepo
+
+        repo = RunRepo(init_db(settings.database.url))
+        if manager is not None:
+            running = [rid for rid in run_ids if manager.get(rid) is not None]
+            if running:
+                raise HTTPException(
+                    status_code=400, detail="运行中的 run 不能删除: " + ", ".join(running)
+                )
+        deleted: list[str] = []
+        missing: list[str] = []
+        for rid in run_ids:
+            run = repo.get(rid)
+            if run is None or run.deleted_at is not None:
+                missing.append(rid)
+                continue
+            repo.purge_run(rid, force=True)
+            shutil.rmtree(Path("results") / rid, ignore_errors=True)
+            deleted.append(rid)
+        return {"deleted": deleted, "missing": missing}
 
     @app.get("/api/runs/{run_id}/compare")
     async def compare(

@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/18 23:30:00
-# @update_time        : 2026/08/18 23:45:00
+# @update_time        : 2026/08/23 13:06:00
 # @description : M4 Web 易用性端点测试——策略列表/上传、report 按需生成、KPI 列、非法任务 400
 
 """M4 Web 易用性（新建表单 / 历史 KPI / Web 报告）服务端测试。
@@ -539,3 +539,26 @@ class TestRunSourceLogsDelete:
         r = TestClient(app).delete("/api/runs/r_ops_1")
         assert r.status_code == 400
         assert "运行中" in r.json()["detail"]
+
+    def test_batch_delete_runs(self, tmp_path: Path, monkeypatch) -> None:
+        """批量物理删除: DB 记录 + results 产物目录一并清除; 缺失/已删计入 missing; 空列表 400。"""
+        self._seed(tmp_path, "r_ops_1")
+        self._seed(tmp_path, "r_ops_2")
+        for rid in ("r_ops_1", "r_ops_2"):
+            d = tmp_path / "results" / rid
+            d.mkdir(parents=True)
+            (d / "summary.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        client = self._client(tmp_path)
+        r = client.post(
+            "/api/runs/batch-delete", json={"run_ids": ["r_ops_1", "r_ops_2", "r_nope"]}
+        )
+        assert r.status_code == 200
+        j = r.json()
+        assert set(j["deleted"]) == {"r_ops_1", "r_ops_2"}
+        assert j["missing"] == ["r_nope"]
+        assert not (tmp_path / "results" / "r_ops_1").exists()
+        assert not (tmp_path / "results" / "r_ops_2").exists()
+        ids = {x["run_id"] for x in client.get("/api/runs").json()}
+        assert "r_ops_1" not in ids and "r_ops_2" not in ids
+        assert client.post("/api/runs/batch-delete", json={"run_ids": []}).status_code == 400
