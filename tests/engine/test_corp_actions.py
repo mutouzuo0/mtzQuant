@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import date
 from datetime import datetime as dt
+from pathlib import Path
 
 import pytest
 
@@ -160,3 +161,47 @@ def test_three_time_point_order_validation() -> None:
         )
     with pytest.raises(MtzQuantError, match="ratio 必须为正"):
         _bonus(ex=date(2026, 6, 15), announce=date(2026, 6, 1), ratio=0.0)
+
+
+# ------------------------------------------------------------------
+# 共享公司行为日历（设计 3.12）: data/corporate_actions/{type}/{code}.csv 驱动 session 调仓
+# ------------------------------------------------------------------
+def test_shared_corp_calendar_split_applies(tmp_path: Path) -> None:
+    """共享日历拆股在 ex_date 开盘前生效: 持仓 ×2、成本稀释（不依赖任务配置 corp_actions）。"""
+    from mtzquant.engine.engine import UnifiedBacktestEngine
+    from mtzquant.engine.results import ResultStore
+    from mtzquant.engine.runner import _settings_fees, build_pipeline
+    from mtzquant.engine.session import BacktestSession
+    from tests.fixtures.backtest_env import make_backtest_env
+
+    env = make_backtest_env(
+        tmp_path,
+        code="510300.SH",
+        n=30,
+        price=10.0,
+        strategy_text="def initialize(context):\n    pass\n\ndef on_bar(context, bar):\n    pass\n",
+    )
+    split_dir = env.data_root / "corporate_actions" / "split"
+    split_dir.mkdir(parents=True)
+    (split_dir / "510300.SH.csv").write_text(
+        "announce_date,ex_date,ratio\n2020-01-08,2020-01-09,2.0\n", encoding="utf-8"
+    )
+    # 任务配置 corp_actions 为空 → 拆股来源只能是共享日历
+    env.task.backtest.initial_positions = {"510300.SH": 1000}
+
+    pipeline = build_pipeline(env.settings, env.task.universe)
+    store = ResultStore(run_id="r_cal")
+    session = BacktestSession(
+        env.task,
+        driver=pipeline.driver,
+        provider=pipeline.provider,
+        calendar=pipeline.calendar,
+        run_id="r_cal",
+        settings_fees=_settings_fees(env.settings),
+        result_store=store,
+    )
+    UnifiedBacktestEngine(session, broker=session.broker).run()
+
+    pos = session.account.positions["510300.SH"]
+    assert pos.total_qty == 2000.0  # 2:1 拆股 → 数量翻倍
+    assert abs(pos.avg_cost - 5.0) < 1e-9  # 成本 10 → 5 稀释

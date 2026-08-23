@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 11:00:00
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/23 13:20:00
 # @description : I1 mtzquant CLI：run/list/report/replay/config/cache/fetch/sql/validate/serve
 
 """mtzquant CLI（设计 10.1 三调用面之一; typer + rich, --json 机读）。
@@ -1014,6 +1014,86 @@ def fetch(
             fr.reason,
         )
     console.print(table)
+
+
+# ============================================================
+# fetch-corp-actions（3.12）: 自动灌入共享公司行为日历（拆股扫描 + fund_div 分红）
+# ============================================================
+@app.command("fetch-corp-actions")
+def fetch_corp_actions(
+    codes: Annotated[
+        str | None, typer.Option("--codes", help="逗号分隔代码; 缺省=扫描全部本地 ETF 日线")
+    ] = None,
+    start: Annotated[str | None, typer.Option("--start", help="开始日期 YYYY-MM-DD")] = None,
+    end: Annotated[str | None, typer.Option("--end", help="结束日期 YYYY-MM-DD")] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="机读输出")] = False,
+) -> None:
+    """自动灌入共享公司行为日历 data/corporate_actions/{type}/{code}.csv。
+
+    拆股（份额折算）从本地日线价格跳变扫描反推; 分红走 tushare fund_div（权威）。
+    事件按 (code, ex_date) 合并去重落盘, 引擎回测自动读取（设计 3.12）。
+    """
+    from mtzquant.data.corporate_actions import fetch_corporate_actions
+
+    try:
+        settings = load_settings()
+        root = Path(settings.data.local_csv.root_path)
+        if codes:
+            code_list = [c.strip() for c in codes.split(",") if c.strip()]
+        else:
+            kline_dir = root / "kline" / "etf" / "day"
+            code_list = (
+                sorted(p.stem for p in kline_dir.glob("*.csv")) if kline_dir.is_dir() else []
+            )
+        if not code_list:
+            raise typer.BadParameter("未找到任何 ETF 日线（--codes 或 data/kline/etf/day/ 为空）")
+        s = date.fromisoformat(start or "2010-01-01")
+        e = date.fromisoformat(end or date.today().isoformat())
+        reports = fetch_corporate_actions(root, code_list, s, e)
+    except (typer.Exit, typer.BadParameter):
+        raise
+    except MtzQuantError as exc:
+        _emit_error(exc, json_out=json_out)
+        return
+    except Exception as exc:  # noqa: BLE001
+        _emit_error(exc, json_out=json_out)
+        return
+
+    if json_out:
+        _print_json(
+            [
+                {
+                    "code": r.code,
+                    "status": r.status,
+                    "splits": r.splits,
+                    "dividends": r.dividends,
+                    "reason": r.reason,
+                }
+                for r in reports
+            ]
+        )
+        return
+    table = Table(title="公司行为日历灌入报告（3.12）")
+    table.add_column("代码")
+    table.add_column("状态")
+    table.add_column("拆股")
+    table.add_column("分红")
+    table.add_column("说明")
+    mark = {
+        "ok": "[green]ok[/green]",
+        "skipped": "[yellow]skipped[/yellow]",
+        "failed": "[red]failed[/red]",
+    }
+    total_s = sum(r.splits for r in reports)
+    total_d = sum(r.dividends for r in reports)
+    for r in reports:
+        if r.status == "skipped":
+            continue
+        table.add_row(
+            r.code, mark.get(r.status, r.status), str(r.splits), str(r.dividends), r.reason
+        )
+    console.print(table)
+    console.print(f"合计: {len(reports)} 标的, 拆股 {total_s} 处, 分红 {total_d} 条")
 
 
 # ============================================================

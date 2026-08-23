@@ -13,14 +13,7 @@
     "frequency": "1d",
     "initial_positions": {},
     "strict_schedule": false,
-    "corp_actions": [
-      {"code": "515050.SH", "type": "split", "ratio": 3.0, "announce_date": "2026-05-12", "ex_date": "2026-05-13"},
-      {"code": "512480.SH", "type": "split", "ratio": 2.0, "announce_date": "2026-07-02", "ex_date": "2026-07-03"},
-      {"code": "510880.SH", "type": "cash_div", "per_share_cash": 0.142, "announce_date": "2025-01-16", "ex_date": "2025-01-21", "pay_date": "2025-01-24"},
-      {"code": "510880.SH", "type": "cash_div", "per_share_cash": 0.143, "announce_date": "2026-01-16", "ex_date": "2026-01-21", "pay_date": "2026-01-26"},
-      {"code": "512100.SH", "type": "cash_div", "per_share_cash": 0.037, "announce_date": "2025-01-10", "ex_date": "2025-01-15", "pay_date": "2025-01-20"},
-      {"code": "512100.SH", "type": "cash_div", "per_share_cash": 0.041, "announce_date": "2026-01-14", "ex_date": "2026-01-19", "pay_date": "2026-01-22"}
-    ]
+    "corp_actions": []
   },
   "universe": [
     "000300.SH",

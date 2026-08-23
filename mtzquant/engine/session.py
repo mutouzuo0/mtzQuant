@@ -37,6 +37,7 @@ from mtzquant.adapters.base import create_adapter
 from mtzquant.core.errors import MtzQuantError
 from mtzquant.core.types import KLINE_COLUMNS
 from mtzquant.data.calendar import TradeCalendar
+from mtzquant.data.corporate_actions import load_corporate_actions
 from mtzquant.data.drivers.base import SourceDriver
 from mtzquant.data.provider import MarketDataProvider
 from mtzquant.engine.account import Account, Position
@@ -274,10 +275,17 @@ class BacktestSession:
                 for k, v in sorted(params.items()):
                     g[k] = v
 
-        # 公司行为（task.backtest.corp_actions, 3.14）
-        self._corp_actions: list[CorporateAction] = [
-            self._parse_corp_action(item) for item in task.backtest.corp_actions
-        ]
+        # 公司行为: 共享日历 data/corporate_actions/{type}/{code}.csv（设计 3.12, 通用市场数据,
+        # 独立于价格与策略）自动加载 + 任务配置 corp_actions 覆盖（向后兼容, 后者优先）。
+        self._corp_actions: list[CorporateAction] = []
+        if self._driver is not None:
+            lcs = getattr(self._driver, "settings", None)
+            root = Path(getattr(lcs, "root_path", "data"))
+            tmpl = getattr(lcs, "corporate_actions_dir", "corporate_actions/{type}")
+            self._corp_actions = [
+                self._parse_corp_action(item) for item in load_corporate_actions(root, tmpl)
+            ]
+        self._corp_actions += [self._parse_corp_action(item) for item in task.backtest.corp_actions]
 
         self._init_initial_positions()
         self._init_benchmark()
@@ -310,8 +318,8 @@ class BacktestSession:
             announce_date=date.fromisoformat(str(item.get("announce_date", item["ex_date"]))),
             ex_date=date.fromisoformat(str(item["ex_date"])),
             pay_date=date.fromisoformat(str(item["pay_date"])) if item.get("pay_date") else None,
-            per_share_cash=item.get("per_share_cash"),
-            ratio=float(item.get("ratio", 0.0)),
+            per_share_cash=float(item["per_share_cash"]) if item.get("per_share_cash") else None,
+            ratio=float(item["ratio"]) if item.get("ratio") else 0.0,
         )
 
     def _init_initial_positions(self) -> None:

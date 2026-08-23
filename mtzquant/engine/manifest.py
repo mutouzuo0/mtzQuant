@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/23 12:10:00
 # @description : I3 RunManifest：确定性重放清单（strategy/data/config 哈希聚合, 设计 8.8）
 
 """RunManifest（设计 8.8）——确定性重放清单与治理。
@@ -218,7 +218,8 @@ def _asset_versions(driver: SourceDriver, root: Path) -> dict[str, str]:
             data_root / lcs.master_dir / "instruments.csv",
         ],
     }
-    corp_dir = data_root / lcs.corporate_actions_dir
+    # 公司行为: corporate_actions/{type} 占位剥离后 rglob 全量 .csv（设计 3.12）
+    corp_dir = data_root / Path(str(lcs.corporate_actions_dir).split("{type}")[0])
     corp_files = sorted(corp_dir.rglob("*.csv")) if corp_dir.is_dir() else []
     candidates["corp_actions"] = corp_files
     out: dict[str, str] = {}
