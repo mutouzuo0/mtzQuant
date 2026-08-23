@@ -44,3 +44,6 @@ desktop.ini
 .idea/
 .vscode/
 *.swp
+
+# ---- 编辑器换行备份（bat 的 LF 副本, 不入库） ----
+*.bat.lf.bak
