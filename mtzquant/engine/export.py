@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 03:40:00
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/19 10:30:00
 # @description : H RunStore.export：结果导出 CSV/JSON + 指标汇总（设计 9.1/8.4）
 
 """RunStore.export（设计 9.1）——结果导出与 DB 同源。
@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -50,6 +50,7 @@ class ExportBundle:
     task: dict[str, Any] | None = None
     strategy_code: str | None = None
     benchmark_nav: list[float] | None = None
+    frictions: list[str] = field(default_factory=list)  # 撮合摩擦（N1; 带默认放末尾兼容旧构造）
 
 
 class RunStore:
@@ -89,6 +90,7 @@ class RunStore:
             },
             "fees": bundle.fees,
             "degradations": bundle.degradations,
+            "frictions": bundle.frictions,
             "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         }
 

@@ -285,6 +285,42 @@ def test_df06_dry_run_no_write(tmp_path: Path) -> None:
 
 
 # ==================================================================
+# T-DF06b 覆盖语义（P2-2: dry_run 说清「已有/缺失/将下载」）
+# ==================================================================
+def test_df06_dry_run_coverage_semantics(tmp_path: Path) -> None:
+    # 本地已有 2024-01-02 ~ 2024-01-10 的交易日（共 7 个工作日）
+    _write_local(tmp_path, _biz(pd.date_range(date(2024, 1, 2), date(2024, 1, 10)).date))
+
+    def fake(code, start, end, *, source, instrument_type):  # type: ignore[no-untyped-def]
+        raise AssertionError("dry_run 不应联网下载")
+
+    f = _fetcher(tmp_path, fake)
+    r = f.fetch([CODE], START, END, dry_run=True)[0]
+    assert r.status == "dry_run"
+    assert r.covered_count == 7
+    assert r.covered_start == "2024-01-02" and r.covered_end == "2024-01-10"
+    assert r.missing_days == 16  # 1 月共 23 个工作日 − 已有 7
+    assert r.missing_segments == ["2024-01-01", "2024-01-11~2024-01-31"]
+    # 单日缺失不再显示成 "2024-01-01~2024-01-01"（零长度段歧义消除）
+    assert "2024-01-01~2024-01-01" not in r.missing_segments
+    assert "已全覆盖" in r.reason or "缺失" in r.reason
+
+
+def test_df06_dry_run_fully_covered(tmp_path: Path) -> None:
+    _write_local(tmp_path, _biz(pd.date_range(START, END).date))
+
+    def fake(code, start, end, *, source, instrument_type):  # type: ignore[no-untyped-def]
+        raise AssertionError("dry_run 不应联网下载")
+
+    f = _fetcher(tmp_path, fake)
+    r = f.fetch([CODE], START, END, dry_run=True)[0]
+    assert r.status == "dry_run"
+    assert r.missing_days == 0
+    assert r.missing_segments == []
+    assert r.covered_count == 23
+
+
+# ==================================================================
 # T-DF07 去重拒绝写盘（人为构造重复 dt → 原文件完好）
 # ==================================================================
 def test_df07_dup_dt_rejected_original_intact(tmp_path: Path) -> None:

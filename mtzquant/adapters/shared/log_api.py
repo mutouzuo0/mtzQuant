@@ -58,4 +58,9 @@ def make_log(
     log.warn = _level_fn(emit, "warn", current_dt)  # type: ignore[attr-defined]  # 聚宽拼写
     log.warning = _level_fn(emit, "warning", current_dt)  # type: ignore[attr-defined]  # PTrade 拼写
     log.error = _level_fn(emit, "error", current_dt)  # type: ignore[attr-defined]
+
+    def _set_level(_name: str = "", _level: str = "") -> None:
+        """聚宽 log.set_level(...) 兼容 no-op（注入 log 已限定级别, 过滤无意义）。"""
+
+    log.set_level = _set_level  # type: ignore[attr-defined]
     return log

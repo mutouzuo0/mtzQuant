@@ -36,12 +36,14 @@ from mtzquant.core.errors import MtzQuantError
 TABLE_SPECS: dict[str, dict[str, str]] = {
     "fina_indicator": {"event_col": "end_date", "published_col": "ann_date"},
     "daily_basic": {"event_col": "trade_date", "published_col": "trade_date"},
+    "dividend": {"event_col": "record_date", "published_col": "ann_date"},
 }
 
 # 各表默认可用字段（fields=None 时返回; 数值字段, 缺失列自动跳过）
 TABLE_FIELDS: dict[str, tuple[str, ...]] = {
     "fina_indicator": ("netprofit_yoy", "or_yoy"),
     "daily_basic": ("pe", "pb", "total_mv", "circ_mv"),
+    "dividend": ("record_date", "cash_div_tax", "ex_date", "div_proc"),
 }
 
 _SSE = "Asia/Shanghai"

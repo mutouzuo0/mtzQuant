@@ -124,7 +124,7 @@ def test_pt01_official_fields_projection(tmp_path: Path) -> None:
     assert p["sim_freq"] == "day"
     assert p["blotter_dt"].startswith("2020-")  # 每 bar 刷新
     # 手算: 第5根下单 1000 股, 次日开盘 10.0×1.001=10.01 成交, 佣金 max(5, 10010×1e-4)=5.01
-    assert p["pos_sid"] == "510300.XSHG"  # 官方 sid（外部码, 4.7）
+    assert p["pos_sid"] == "510300.SS"  # 官方 sid（外部码 .SS, 4.7 修订）
     assert p["pos_amount"] == 1000.0
     assert p["pos_enable"] == 0.0  # T+1: 当日买入不可卖
     assert abs(p["pos_cost"] - 10.011) < 0.01  # (10010 + 5.01 佣金)/1000 ≈ 10.015 稀释后
@@ -173,7 +173,7 @@ def test_pt02_status_matrix() -> None:
 # ------------------------------------------------------------------
 def test_pt03_bar_data_factory_fields() -> None:
     bd = make_bar_data(
-        symbol="510300.XSHG",
+        symbol="510300.SS",
         dt=datetime(2026, 1, 2, 15, 0),
         open=10.0,
         close=10.5,
@@ -210,7 +210,7 @@ def test_pt03_bar_data_factory_fields() -> None:
 
 BODY_BAR = """\
 if g.n == 3:
-    bd = data['510300.XSHG']
+    bd = data['510300.SS']
     g.probe['bd'] = {k: str(getattr(bd, k)) for k in
                      ('symbol','open','close','price','volume','money','preclose',
                       'high_limit','low_limit','is_open','unlimited')}
@@ -220,7 +220,7 @@ if g.n == 3:
 def test_pt03_bar_data_in_handle_data(tmp_path: Path) -> None:
     r = _ptrade_run(tmp_path, BODY_BAR, init_extra="set_universe(['510300.SS'])", n=6)
     bd = r.probe["bd"]
-    assert bd["symbol"] == "510300.XSHG"
+    assert bd["symbol"] == "510300.SS"
     assert float(bd["open"]) == 10.0 and float(bd["close"]) == 10.0  # 平坦价
     assert float(bd["price"]) == 10.0
     assert float(bd["volume"]) == 10_000_000.0
@@ -274,8 +274,8 @@ def test_pt04_to_pt10_api_families(tmp_path: Path) -> None:
 BODY_SNAPSHOT = """\
 if g.n == 2:
     snap = get_snapshot(['510300.SS'])
-    g.probe['snap_open'] = snap['510300.XSHG'].is_open
-    g.probe['snap_close'] = snap['510300.XSHG'].close
+    g.probe['snap_open'] = snap['510300.SS'].is_open
+    g.probe['snap_close'] = snap['510300.SS'].close
 """
 
 

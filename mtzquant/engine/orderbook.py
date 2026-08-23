@@ -50,17 +50,22 @@ class OpenOrderBook:
         ref_price: float,
         commission_rate: float = 0.0001,
         min_commission: float = 5.0,
+        slippage_ratio: float = 0.0,
     ) -> OrderEvent | None:
         """受理订单: 现金预检（买入）→ 冻结 → 进场; 不足 → REJECTED（不进场）。
 
         返回受理事件或拒单事件; 拒单时订单终态 REJECTED、无冻结。
+        `slippage_ratio`: 冻结预估价按 (1+滑点) 上浮——next_open 撮合含滑点, 防
+        多单等分现金时冻结低估导致成交超现金（5.3.4）。
         """
         if order.order_id in self._orders:
             raise MtzQuantError(
                 f"订单 {order.order_id!r} 重复受理", stage="orderbook", hint="order_id 全局唯一"
             )
         if order.side in (OrderDirection.BUY, OrderDirection.CLOSE_SHORT, OrderDirection.OPEN_LONG):
-            est = self._estimate_freeze(order, ref_price, commission_rate, min_commission)
+            est = self._estimate_freeze(
+                order, ref_price, commission_rate, min_commission, slippage_ratio
+            )
             if est > available_cash:
                 order.status = OrderStatus.REJECTED
                 order.reject_reason = "insufficient_cash"
@@ -81,9 +86,13 @@ class OpenOrderBook:
 
     @staticmethod
     def _estimate_freeze(
-        order: Order, ref_price: float, commission_rate: float, min_commission: float
+        order: Order,
+        ref_price: float,
+        commission_rate: float,
+        min_commission: float,
+        slippage_ratio: float = 0.0,
     ) -> float:
-        amount = order.qty * ref_price
+        amount = order.qty * ref_price * (1 + slippage_ratio)
         fee = max(min_commission, commission_rate * amount)
         return amount + fee
 

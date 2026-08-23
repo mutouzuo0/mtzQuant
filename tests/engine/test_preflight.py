@@ -267,3 +267,20 @@ class TestWsHubReplayFromZero:
 
         loop.run_until_complete(_run())
         loop.close()
+
+
+# ============================================================
+# runner 自动派生标的（universe 为空 → detect_codes 从策略源码提取, 表单无需手填标的池）
+# ============================================================
+class TestRunTaskAutoUniverse:
+    def test_empty_universe_derived_from_strategy(self, tmp_path: Path) -> None:
+        from mtzquant.engine.runner import run_task
+        from tests.fixtures.backtest_env import make_backtest_env
+
+        env = make_backtest_env(tmp_path, n=30)
+        env.task.universe = []  # 模拟表单不填标的池
+        result = run_task(env.task, settings=env.settings, out_root=env.out_root, db_url=env.db_url)
+        assert result.status in ("completed_exact", "completed_degraded")
+        # 策略源码含 '510300.SH' → 已自动回填 universe（会话/清单/params 同源）
+        assert env.task.universe == ["510300.SH"]
+        assert result.bundle.task["universe"] == ["510300.SH"]

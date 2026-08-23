@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 11:00:00
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/23 10:30:00
 # @description : L4-L7 PTradeAdapter：L0 API 注入 + 设置族 + run_daily 调度 + 注册（4.7）
 
 """PTradeAdapter（设计 4.7 / 附录C）——PTrade 官方策略零改动回测。
@@ -24,6 +24,7 @@ bar 盘前不可见, 防前视。
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
@@ -31,7 +32,6 @@ from typing import Any
 
 import pandas as pd
 
-from mtzquant.adapters.shared.code_style import denormalize_code
 from mtzquant.adapters.shared.context_factory import refresh_context
 from mtzquant.adapters.shared.data_apis import DataApiCore
 from mtzquant.adapters.shared.g_container import GContainer
@@ -50,6 +50,9 @@ from .objects import (
     ptrade_position,
     ptrade_symbol,
 )
+
+# get_history 多字段列表的字段别名映射（4.7 近似族）: money=成交额→amount, price=现价→close
+_PTRADE_FIELD_MAP: dict[str, str] = {"money": "amount", "price": "close"}
 
 
 class PTradeAdapter:
@@ -71,7 +74,7 @@ class PTradeAdapter:
         self._initialize: Callable[[Any], None] | None = None
         self._handle_data: Callable[[Any, Any], None] | None = None
         self._before_trading: Callable[[Any, Any], None] | None = None
-        self._after_trading: Callable[[Any], None] | None = None
+        self._after_trading: Callable[..., None] | None = None
         self._ctx = make_ptrade_context(capital_base=0.0, previous_date=None)
         self._ctx.platform = "ptrade"
         self._ctx.g = self._g
@@ -117,9 +120,19 @@ class PTradeAdapter:
             self._handle_data(self._ctx, self._bar_data_map(include_today=True))
 
     def on_after_trading(self, ev: Any = None) -> None:
+        """盘后回调（官方 after_trading_end(context, data); 兼容单参 context 写法）。"""
         if self._after_trading is not None:
             self._refresh(_self_now(self._ctx))
-            self._after_trading(self._ctx)
+            fn = self._after_trading
+            n_pos = sum(
+                1
+                for p in inspect.signature(fn).parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+            )
+            if n_pos >= 2:
+                fn(self._ctx, self._bar_data_map(include_today=True))
+            else:
+                fn(self._ctx)
 
     def take_orders(self) -> list[OrderRequest]:
         out, self._orders = self._orders, []
@@ -292,6 +305,7 @@ class PTradeAdapter:
         ns["check_limit"] = self.check_limit
         ns["is_trade"] = self.is_trade
         ns["get_frequency"] = self.get_frequency
+        ns["get_research_path"] = self.get_research_path
         # 设置族 8 个（4.7）
         ns["set_universe"] = self.set_universe
         ns["set_benchmark"] = self.set_benchmark
@@ -320,7 +334,7 @@ class PTradeAdapter:
         signed = raw if req.direction.value == "buy" else -raw
         receipt = PTradeOrder(
             entrust_no=order_id,
-            symbol=denormalize_code(req.code),
+            symbol=ptrade_symbol(req.code),
             amount=signed,
             dt=_self_now(self._ctx),
         )
@@ -377,7 +391,14 @@ class PTradeAdapter:
         tax_ratio: float = 0.001,
         transfer_fee_ratio: float = 0.0,
     ) -> None:
-        """按品种费率（STOCK/ETF/LOF; M2 统一套用全品种, 品种档案差异归 M3）。"""
+        """按品种费率（STOCK/ETF/LOF; M2 统一套用全品种, 品种档案差异归 M3）。
+
+        兼容垫片: 首参传数值费率（官方常见 `set_commission(0.0001)` 把费率当首参）时
+        视为佣金率并按 ETF 免印花税（该调用风格来自 ETF/LOF 策略）。
+        """
+        if isinstance(tradetype, (int, float)) and 0 < tradetype < 1:
+            commission_ratio = float(tradetype)
+            tradetype = "ETF"
         fn = getattr(self._ctx, "set_fees_fn", None)
         if fn is not None:
             fn(
@@ -413,11 +434,14 @@ class PTradeAdapter:
         if fn is not None:
             fn(ratio)
 
-    def set_limit_mode(self, mode: str) -> None:
-        """'UNLIMITED' → 关闭容量约束（一字板撮合约束保留, 已知近似）。"""
-        if mode != "UNLIMITED":
+    def set_limit_mode(self, limit_mode: str) -> None:
+        """'UNLIMITED' → 关闭容量约束（一字板撮合约束保留, 已知近似）。
+
+        参数名对齐官方 `set_limit_mode(limit_mode=...)`, 位置传参仍兼容。
+        """
+        if limit_mode != "UNLIMITED":
             raise MtzQuantError(
-                f"set_limit_mode 仅支持 'UNLIMITED', 得到 {mode!r}", stage="adapter:ptrade"
+                f"set_limit_mode 仅支持 'UNLIMITED', 得到 {limit_mode!r}", stage="adapter:ptrade"
             )
         fn = getattr(self._ctx, "set_liquidity_fn", None)
         if fn is not None:
@@ -497,12 +521,17 @@ class PTradeAdapter:
         return view
 
     def get_positions(self) -> dict[str, Any]:
-        """全部持仓（symbol → PTrade Position）。"""
+        """全部持仓（symbol → PTrade Position, sid=外部码, 与 get_position 一致）。"""
         account = getattr(self._ctx, "account", None)
         if account is None:
             return {}
         pf = uniform_portfolio(account)
-        return {ptrade_symbol(c): ptrade_position(p) for c, p in sorted(pf.positions.items())}
+        out: dict[str, Any] = {}
+        for c, p in sorted(pf.positions.items()):
+            view = ptrade_position(p)
+            view.sid = ptrade_symbol(c)  # 官方 sid（外部码, 4.7; 与单标的 get_position 对齐）
+            out[ptrade_symbol(c)] = view
+        return out
 
     # ------------------------------------------------------------------
     # 数据族（4.7 / 3.13）
@@ -516,7 +545,11 @@ class PTradeAdapter:
         fq: str = "pre",
         include: bool = False,
     ) -> Any:
-        """官方 get_history: 历史数据（count 根 × 单字段; 单标的 np.array, 多标的 DataFrame）。"""
+        """官方 get_history: 历史数据（count 根 × 单字段; 单标的 np.array, 多标的 DataFrame）。
+
+        多字段列表 `field=['open','high',...]` → 长表（index=dt, code 列=平台外部码, 各字段列）,
+        对齐原版策略 get_history 多字段直接返回带 code 列长表的用法（4.7 近似族）。
+        """
         core = self._data_core()
         if isinstance(security_list, str):
             codes = [normalize_code(security_list)]
@@ -525,6 +558,19 @@ class PTradeAdapter:
         else:
             universe_fn = getattr(self._ctx, "universe_fn", None)
             codes = list(universe_fn()) if universe_fn is not None else []
+        if isinstance(field, (list, tuple)):
+            fields = [_PTRADE_FIELD_MAP.get(f, f) for f in field]
+            frames = []
+            for c in codes:
+                frame = core.history(c, count, unit="1d", fields=fields, include_today=include)
+                if frame is None or frame.empty:
+                    continue  # 窗口内无行情（如未上市）→ 无行, 还原官方语义
+                frame = frame.copy()
+                frame["code"] = ptrade_symbol(c)
+                frames.append(frame)
+            if not frames:
+                return pd.DataFrame(columns=["code"] + fields)
+            return pd.concat(frames)
         frames = [
             core.history(c, count, unit="1d", fields=[field], include_today=include) for c in codes
         ]
@@ -645,6 +691,15 @@ class PTradeAdapter:
         """回测频率标识（日线 '1d'）。"""
         task = getattr(self._ctx, "task", None)
         return getattr(task.backtest, "frequency", "1d") if task is not None else "1d"
+
+    def get_research_path(self) -> str:
+        """PTrade 研究目录路径 stub——回测无研究沙箱, 返回数据根目录供策略读取。
+
+        官方语义: 返回用户研究数据目录（get_research_data 的基路径）; 本地回测退化为
+        `data/` 根路径字符串, 满足策略仅赋值 `g.user_path` 不实际读取的场景（V28.1 等）。
+        """
+        root = Path.cwd() / "data"
+        return str(root)
 
 
 class _InnerGateway:

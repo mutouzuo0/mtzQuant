@@ -138,6 +138,10 @@ class CoverageChecker:
             d += timedelta(days=1)
         return out
 
+    def day_count(self, start: date, end: date) -> int:
+        """区间内期望交易日数量（P2-2: 覆盖报告「将下载 N 天」的统计口径）。"""
+        return len(self._expected_days(start, end))
+
     def _load_calendar(self) -> set[date]:
         """读 data/calendars/trade_days.csv（列名不敏感: date/trade_date/trading_day）。"""
         if self._calendar is not None:

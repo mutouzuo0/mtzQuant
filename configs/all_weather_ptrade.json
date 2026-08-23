@@ -7,7 +7,7 @@
   },
   "backtest": {
     "start": "2020-01-01",
-    "end": "2026-08-16",
+    "end": "2026-08-17",
     "initial_capital": 100000,
     "benchmark": "000300.SH",
     "frequency": "1d",

@@ -18,9 +18,17 @@
   nav a.active { background:var(--acc); color:#fff; }
   .muted { color:var(--muted); }
   #statusBadge { padding:2px 10px; border-radius:10px; font-size:12px; background:#26304a; }
+  .s-live { background:#0f2e1d; color:var(--green); }
+  .s-connecting { background:#3a3016; color:var(--yellow); }
+  .s-closed { background:#262a33; color:var(--muted); }
   .s-completed_exact,.s-completed_degraded { background:#0f2e1d; color:var(--green); }
   .s-running { background:#1e2a44; color:var(--acc); }
   .s-error { background:#3a1616; color:var(--red); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button:disabled:hover { border-color:var(--line); }
+  .idle-banner { background:#1e2a44; border:1px dashed var(--acc); border-radius:8px;
+                 padding:10px 14px; margin-bottom:12px; color:var(--fg); }
+  .idle-banner a { color:var(--acc); }
   .progress-wrap { flex:1 1 100%; margin-top:4px; }
   #bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; }
   #barFill { height:100%; width:0%; background:linear-gradient(90deg,#2e6bff,#4c8dff); transition:width .3s; }
@@ -39,8 +47,10 @@
   th,td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); }
   th { color:var(--muted); font-weight:500; }
   td.num { text-align:right; font-variant-numeric:tabular-nums; }
-  #logs { height:150px; overflow:auto; font:11px/1.6 Consolas,monospace; color:var(--muted);
-          white-space:pre-wrap; }
+  .logcard { display:flex; flex-direction:column; }
+  #logs { flex:1 1 auto; min-height:150px; overflow:auto; font:11px/1.6 Consolas,monospace;
+          color:var(--muted); white-space:pre-wrap; }
+  .log-err { color:var(--red); } .log-warn { color:var(--yellow); }
   .buy { color:var(--red); } .sell { color:var(--green); }
   button { padding:5px 14px; border:1px solid var(--line); background:var(--panel); color:var(--fg);
            border-radius:6px; cursor:pointer; }
@@ -48,13 +58,41 @@
   button.danger { color:var(--red); } button.ok { color:var(--green); }
   input,select,textarea { background:#0b101d; border:1px solid var(--line); color:var(--fg);
            border-radius:6px; padding:6px 8px; font:inherit; }
+  label.btn-file { padding:5px 14px; border:1px solid var(--line); border-radius:6px; cursor:pointer; }
+  label.btn-file:hover { border-color:var(--acc); }
   .row { display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap; }
-  .page { display:none; padding:12px 20px; }
+  .page { display:none; padding:12px 20px; max-width:1320px; margin:0 auto; width:100%; }
   .page.active { display:block; }
   .tab { display:inline-block; padding:5px 14px; border-radius:6px; cursor:pointer; color:var(--muted); }
   .tab.active { background:var(--acc); color:#fff; }
   #foot { padding:10px 20px; color:var(--muted); font-size:12px; }
   .pill { background:var(--line); padding:2px 8px; border-radius:8px; font-size:11px; }
+  .s-paused { background:#3a3016; color:var(--yellow); }
+  .s-stopped { background:#262a33; color:var(--muted); }
+  .fl { display:inline-block; min-width:86px; color:var(--muted); }
+  .tabs { display:inline-flex; gap:2px; background:var(--panel); border:1px solid var(--line);
+          border-radius:8px; padding:3px; flex-wrap:wrap; }
+  th[data-s] { cursor:pointer; user-select:none; }
+  th[data-s]:hover { color:var(--fg); }
+  #toast { position:fixed; left:50%; bottom:34px; transform:translateX(-50%) translateY(20px); opacity:0;
+           background:#1e2a44; color:var(--fg); border:1px solid var(--acc); padding:8px 18px;
+           border-radius:8px; transition:all .25s; pointer-events:none; z-index:99; }
+  #toast.show { opacity:1; transform:translateX(-50%); }
+  #toast.err { border-color:var(--red); }
+  #modal { position:fixed; inset:0; z-index:98; display:none; }
+  #modalMask { position:absolute; inset:0; background:rgba(0,0,0,.55); }
+  #modalBox { position:absolute; left:50%; top:8%; transform:translateX(-50%); width:min(880px,92vw);
+              max-height:82vh; display:flex; flex-direction:column; background:var(--panel);
+              border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  #modalHead { display:flex; align-items:center; gap:10px; padding:10px 14px;
+               border-bottom:1px solid var(--line); }
+  #modalTitle { flex:1; font-weight:600; }
+  #modalBody { flex:1 1 auto; overflow:auto; padding:12px 14px; }
+  #modalBody pre { margin:0; white-space:pre-wrap; word-break:break-all;
+                   font:12px/1.6 Consolas,monospace; }
+  #logLines { font:11px/1.6 Consolas,monospace; color:var(--muted); white-space:pre-wrap; }
+  #logLines .log-err { color:var(--red); }
+  #logLines .log-warn { color:var(--yellow); }
 </style>
 </head>
 <body>
@@ -69,7 +107,7 @@
     <a href="#/help" data-nav="help">帮助</a>
   </nav>
   <span id="taskName" class="muted">—</span>
-  <span id="runId" class="muted">—</span>
+  <span id="startedAt" class="muted">—</span>
   <span id="statusBadge">connecting…</span>
   <div class="progress-wrap">
     <div id="bar"><div id="barFill"></div></div>
@@ -81,11 +119,18 @@
 <div id="page-monitor" class="page active">
 <main>
   <div>
+    <div class="idle-banner" id="monIdle" style="display:none">
+      🚀 当前无运行中回测任务。<a href="#/new">去新建回测</a>（或从「历史」页对已完成 run 点「订阅监控」补看）。
+    </div>
     <div class="row">
-      <span>run_id: <input id="monRunId" placeholder="留空 = 全部运行中会话" style="width:260px"></span>
-      <button id="btnControlPause" class="">暂停</button>
-      <button id="btnControlResume" class="ok">恢复</button>
-      <button id="btnControlStop" class="danger">终止</button>
+      <span>回测会话
+        <select id="monSession" style="min-width:340px"><option value="">（加载中…）</option></select>
+      </span>
+      <button id="btnRefreshSessions" title="刷新运行中会话列表">刷新</button>
+      <span id="monRunning" class="muted"></span>
+      <button id="btnControlPause" class="" disabled title="先选择回测会话再操作">暂停</button>
+      <button id="btnControlResume" class="ok" disabled title="先选择回测会话再操作">恢复</button>
+      <button id="btnControlStop" class="danger" disabled title="先选择回测会话再操作">终止</button>
     </div>
     <div class="metrics">
       <div class="metric"><div class="l">总收益</div><div class="v" id="m_total">—</div></div>
@@ -103,7 +148,7 @@
     </div>
   </div>
   <div>
-    <div class="card">
+    <div class="card logcard">
       <h2>运行日志</h2>
       <div id="logs"></div>
     </div>
@@ -111,35 +156,91 @@
 </main>
 </div>
 
-<!-- ==================== 新建回测页 ==================== -->
+<!-- ==================== 新建回测页（M4 表单化: 平台/上传/区间/预览/校验） ==================== -->
 <div id="page-new" class="page">
-  <div class="card" style="max-width:760px">
-    <h2>新建回测（提交后强制子进程执行, D1）</h2>
-    <div class="row"><span style="width:90px">任务 JSON</span>
-      <input id="newTask" style="flex:1" placeholder="task.json 路径, 如 configs/demo_dual_ma.json"></div>
+  <div class="card" style="max-width:880px">
+    <h2>新建回测（表单配置 · 提交后由独立子进程执行, 崩溃不影响控制台）</h2>
     <div class="row">
-      <span style="width:90px">任务内容</span>
-      <textarea id="newTaskJson" rows="10" style="flex:1;font:12px/1.5 Consolas,monospace"></textarea>
+      <span class="fl">平台</span>
+      <select id="newPlatform">
+        <option value="ptrade">PTrade</option>
+        <option value="joinquant">聚宽 JoinQuant</option>
+      </select>
+      <span class="fl">策略文件</span>
+      <select id="newStrategy" style="min-width:300px"></select>
+      <button id="btnRefreshStrategies" title="重新扫描 strategies 目录">刷新</button>
+      <label class="btn-file">上传本地 .py<input type="file" id="newStrategyFile" accept=".py" hidden></label>
+      <span id="newUploadMsg" class="muted"></span>
     </div>
     <div class="row">
-      <button id="btnLoadTask" class="">读取文件</button>
+      <span class="fl">任务名</span>
+      <input id="newTaskName" style="width:240px" placeholder="策略名_日期（自动生成, 可改）">
+      <span class="fl">初始资金</span>
+      <input id="newCapital" type="number" value="1000000" style="width:130px">
+      <span id="capFmt" class="muted"></span>
+      <span class="fl">基准</span>
+      <input id="newBenchmark" placeholder="000300.SH（可空）" style="width:130px">
+      <span class="fl">频率</span>
+      <select id="newFreq" disabled title="当前仅支持日线（分钟线规划中）"><option value="1d">日线</option></select>
+    </div>
+    <div class="row">
+      <span class="fl">开始日期</span><input id="newStart" type="date">
+      <span class="fl">结束日期</span><input id="newEnd" type="date">
+      <span id="dateHint" class="muted"></span>
+    </div>
+    <details class="row" style="align-items:flex-start">
+      <summary class="muted">高级参数（费率等, 留空 = 品种默认）</summary>
+      <div class="row">
+        <span class="fl">佣金率</span><input id="feeCommRate" type="number" step="0.0001" min="0" placeholder="如 0.0003" style="width:110px">
+        <span class="fl">最低佣金</span><input id="feeCommMin" type="number" step="0.01" min="0" placeholder="如 5" style="width:110px">
+        <span class="fl">印花税率</span><input id="feeStamp" type="number" step="0.0001" min="0" placeholder="如 0.001" style="width:110px">
+        <span class="fl">过户费率</span><input id="feeTransfer" type="number" step="0.0001" min="0" placeholder="如 0.00002" style="width:110px">
+      </div>
+    </details>
+    <div class="row">
       <button id="btnSubmit" class="ok">提交回测</button>
+      <button id="btnToggleJson">高级：JSON 模式</button>
       <span id="newMsg" class="muted"></span>
+    </div>
+    <div id="newJsonBox" style="display:none">
+      <div class="row">
+        <span class="fl">任务 JSON</span>
+        <input id="newTask" style="flex:1" placeholder="可选: 读取已有 task.json 路径, 如 configs/demo_dual_ma.json">
+        <button id="btnLoadTask">读取文件</button>
+      </div>
+      <textarea id="newTaskJson" rows="14" readonly
+        style="width:100%;font:12px/1.5 Consolas,monospace"></textarea>
     </div>
   </div>
 </div>
 
-<!-- ==================== 历史 / 对比页 ==================== -->
+<!-- ==================== 历史 / 对比页（M4: KPI 列 + 状态中文化 + 筛选排序 + 对比校验） ==================== -->
 <div id="page-history" class="page">
   <div class="row">
+    <span id="histTabs" class="tabs">
+      <span class="tab active" data-f="all">全部</span>
+      <span class="tab" data-f="running">运行中</span>
+      <span class="tab" data-f="completed">成功</span>
+      <span class="tab" data-f="failed">失败</span>
+      <span class="tab" data-f="stopped">已终止</span>
+    </span>
+    <input id="histSearch" placeholder="搜索任务名" style="width:190px">
     <button id="btnRefreshRuns">刷新</button>
-    <span class="muted">勾选 ≤6 个 run 对比</span>
-    <button id="btnCompare" class="ok">对比选中</button>
+    <button id="btnCompare" class="ok" disabled>对比选中 (0/6)</button>
   </div>
   <div class="card">
-    <h2>历史回测（backtest_run, 8.3.1）</h2>
+    <h2>历史回测（点击表头排序 · 状态筛选 · 勾选 ≤6 个已完成 run 对比）</h2>
     <table id="runsTable"><thead><tr>
-      <th>☑</th><th>run_id</th><th>任务</th><th>状态</th><th>夏普</th><th>开始</th><th>操作</th>
+      <th>☑</th>
+      <th data-s="task_name">任务 ⇅</th>
+      <th data-s="platform">平台 ⇅</th>
+      <th data-s="status">状态 ⇅</th>
+      <th data-s="total_return" class="num">总收益 ⇅</th>
+      <th data-s="annual_return" class="num">年化 ⇅</th>
+      <th data-s="max_drawdown" class="num">最大回撤 ⇅</th>
+      <th data-s="sharpe" class="num">夏普 ⇅</th>
+      <th data-s="started_at">开始时间 ⇅</th>
+      <th>操作</th>
     </tr></thead><tbody></tbody></table>
   </div>
   <div id="compareBox" class="card" style="margin-top:12px;display:none">
@@ -150,21 +251,38 @@
   </div>
 </div>
 
+<!-- ==================== 报告详情页（M4: Web 端 report.html, 三面同权 9.1） ==================== -->
+<div id="page-report" class="page">
+  <div class="row">
+    <button id="repBack">← 返回</button>
+    <span id="repRunId" class="muted">—</span>
+    <span id="repStatus" class="pill">—</span>
+    <a id="repOpen" href="#" target="_blank" rel="noopener">新窗口打开原始报告</a>
+    <button id="repReload">重新加载</button>
+    <button id="repRerun" class="ok">用相同参数重跑</button>
+    <span id="repMsg" class="muted"></span>
+  </div>
+  <iframe id="repFrame" style="width:100%;height:calc(100vh - 150px);border:1px solid var(--line);border-radius:8px;background:#fff"></iframe>
+</div>
+
 <!-- ==================== 数据下载页 ==================== -->
 <div id="page-data" class="page">
-  <div class="card" style="max-width:760px">
-    <h2>数据下载（7.6 两步: 检查覆盖 → 确认下载）</h2>
+  <div class="card" style="max-width:900px">
+    <h2>数据下载（两步: 检查覆盖 → 确认下载）</h2>
     <div class="row"><span style="width:90px">代码</span>
       <input id="dlCodes" placeholder="逗号分隔, 如 510300.SH,510500.SH" style="flex:1"></div>
     <div class="row"><span style="width:90px">区间</span>
-      <input id="dlStart" placeholder="YYYY-MM-DD" value="2020-01-01">
-      <span>~</span><input id="dlEnd" placeholder="YYYY-MM-DD"></div>
+      <input id="dlStart" type="date" placeholder="YYYY-MM-DD" value="2020-01-01">
+      <span>~</span><input id="dlEnd" type="date" placeholder="YYYY-MM-DD"></div>
     <div class="row">
       <button id="btnCoverage" class="">检查覆盖</button>
       <button id="btnDownload" class="ok">确认下载</button>
       <span id="dlMsg" class="muted"></span>
     </div>
-    <table id="dlTable"><thead><tr><th>代码</th><th>状态</th><th>新增</th><th>区间</th><th>说明</th></tr></thead><tbody></tbody></table>
+    <table id="dlTable"><thead><tr>
+      <th>代码</th><th>状态</th><th>本地已有</th><th>将下载</th><th>缺失段（前 3 段）</th>
+    </tr></thead><tbody></tbody></table>
+    <p class="muted">「检查覆盖」只读本地数据估算缺口; 「确认下载」联网补齐缺失区间——大区间可能耗时较长, 完成后此表刷新。</p>
   </div>
 </div>
 
@@ -174,8 +292,12 @@
     <button id="btnRefreshScan">刷新</button>
     <span id="scanMsg" class="muted">—</span>
   </div>
+  <div class="idle-banner" id="scanIdle" style="display:none">
+    💡 参数扫描的<b>配置入口暂在命令行</b>: <code>mtzquant scan --help</code>（Web 端当前只读队列进度）。
+    扫描队列由本地 CLI 发起后, 此处实时展示进度与结果。
+  </div>
   <div class="card">
-    <h2>参数扫描队列（BacktestQueue, 10.4）</h2>
+    <h2>参数扫描队列（进度）</h2>
     <table id="scanTable"><thead><tr>
       <th>参数</th><th>run_id</th><th>夏普</th><th>状态</th>
     </tr></thead><tbody></tbody></table>
@@ -184,36 +306,180 @@
 
 <!-- ==================== 帮助页 ==================== -->
 <div id="page-help" class="page">
-  <div class="card" style="max-width:760px">
+  <div class="card" style="max-width:860px">
     <h2>帮助</h2>
-    <p class="muted">mtzQuant Web 控制台——本地优先量化回测框架。</p>
+    <p class="muted">mtzQuant Web 控制台——本地优先的量化回测框架（聚宽 / PTrade 策略可零改动回测）。</p>
+
+    <h3 style="color:var(--acc)">🚀 快速上手（三步跑通第一个回测）</h3>
+    <ol>
+      <li><b>准备策略</b>：把 .py 策略放进 <code>strategies/&lt;平台&gt;/</code>，或在「新建回测」页直接「上传本地 .py」；</li>
+      <li><b>配置任务</b>：「新建回测」页选平台 / 策略 / 区间，点「提交回测」；</li>
+      <li><b>看结果</b>：自动跳转「监控」页看实时进度与净值；完成后到「历史」页点「报告」看完整回测报告。</li>
+    </ol>
+
+    <h3 style="color:var(--acc)">📄 字段说明（新建回测）</h3>
+    <table>
+      <thead><tr><th>字段</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>平台</td><td>策略语法对应平台：PTrade / 聚宽 JoinQuant（原生 native 走 CLI）</td></tr>
+        <tr><td>策略文件</td><td>从 <code>strategies/&lt;平台&gt;/</code> 选择，或本地上传 .py（自动语法预检）</td></tr>
+        <tr><td>初始资金</td><td>回测期初可用现金（默认 100 万）</td></tr>
+        <tr><td>基准</td><td>对比基准指数代码，如 000300.SH；留空则无基准曲线</td></tr>
+        <tr><td>标的池</td><td>非必填：默认从策略源码自动提取标的（如 g.symbols）；全市场扫描型策略可在「JSON 模式」显式指定</td></tr>
+        <tr><td>高级参数</td><td>佣金率 / 最低佣金 / 印花税率 / 过户费率，留空 = 品种默认值</td></tr>
+        <tr><td>JSON 模式</td><td>进阶用法：直接编辑 / 读取完整任务 JSON（含初始持仓、除权除息等全部字段）</td></tr>
+      </tbody>
+    </table>
+
+    <h3 style="color:var(--acc)">❓ 常见问题</h3>
     <ul>
-      <li>监控页: 实时净值/进度/成交; 输入 run_id 订阅指定会话（留空 = 全部）;</li>
-      <li>断线自动按 event_seq 补帧（resume 协议, 6.3/13.5）;</li>
-      <li>新建页: 提交任务 JSON → 子进程隔离执行（D1）;</li>
-      <li>历史页: 多 run 指标对照 + 净值对齐（10.3）;</li>
-      <li>报告: 命令行 <code>mtzquant report &lt;run_id&gt;</code> 生成自包含 report.html。</li>
+      <li><b>状态「完成·降级」是什么？</b> 回测跑完但有部分数据缺失或适配器降级（如某标的停牌段数据不足），结果仍完整可用，详情见报告中的降级清单。</li>
+      <li><b>历史页指标是「—」？</b> 该 run 尚未写入绩效指标（如运行中，或由旧版引擎产生）。运行中请在监控页等完成；旧 run 可在报告页重跑后得到指标。</li>
+      <li><b>数据下载「检查覆盖」和「确认下载」区别？</b> 检查只读本地估算缺口，不联网；确认后才联网补齐缺失区间。</li>
+      <li><b>连接状态徽章？</b> 「已连接」= 与回测服务的实时通道正常；「已断开，重连中…」= 网络抖动自动重连；「连接失败」= 服务未启动或异常。</li>
     </ul>
-    <p class="muted">认证: 非本机绑定时请开启 server.auth_enabled + secrets server.tokens（13.5）。</p>
+
+    <details>
+      <summary class="muted">开发者附录（内部约定, 普通用户可忽略）</summary>
+      <ul>
+        <li>事件流信封: <code>{type, run_id, ts, event_seq, committed, data}</code>，断线按 event_seq 补帧（resume 协议）;</li>
+        <li>子进程隔离执行回测（serve 父进程不加载策略代码）; 认证: <code>server.auth_enabled</code> + secrets server.tokens;</li>
+        <li>报告与 <code>mtzquant report &lt;run_id&gt;</code> 同一自包含 report.html（CLI / Web / Python API 三面同权）。</li>
+      </ul>
+    </details>
   </div>
 </div>
 
-<div id="foot">回测结束后可用 <code>mtzquant report &lt;run_id&gt;</code> 查看完整报告。</div>
+<div id="foot">回测结束后可在「历史 → 报告」直接查看完整 Web 报告（等价于命令行 <code>mtzquant report &lt;run_id&gt;</code>）。</div>
 
-<script src="/static/vendor/echarts.min.js"></script>
-<script src="/static/pages/app.js"></script>
+<!-- ==================== 通用弹窗（历史页: 日志 / 原策略源码） ==================== -->
+<div id="modal">
+  <div id="modalMask"></div>
+  <div id="modalBox">
+    <div id="modalHead">
+      <span id="modalTitle">—</span>
+      <span id="modalActions"></span>
+      <button id="modalClose" title="关闭">✕</button>
+    </div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<script src="/static/vendor/echarts.min.js?v=__ASSET_VERSION__"></script>
+<script src="/static/pages/app.js?v=__ASSET_VERSION__"></script>
 <script>
 "use strict";
 // ---- 监控页（W0 最小版逻辑保留, 只扩不重写）----
 const $ = id => document.getElementById(id);
 const fmt = v => v==null ? "—" : (typeof v==="number" ? v.toLocaleString("zh-CN",{maximumFractionDigits:2}) : String(v));
 const fmtPct = v => v==null ? "—" : (v*100).toFixed(2)+"%";
-const fmtMoney = v => v==null ? "—" : (v/10000).toFixed(1)+"万";
+const fmtMoney = v => v==null ? "—" : (Math.abs(v)>=10000 ? (v/10000).toFixed(2)+"万" : v.toFixed(0)+"元");
 
+function toast(msg, ok=true){
+  // 全局轻提示（app.js 提交/上传/复制等复用; err=true 红边）
+  let t=document.getElementById("toast");
+  if(!t){ t=document.createElement("div"); t.id="toast"; document.body.appendChild(t); }
+  t.textContent=msg;
+  t.className="show"+(ok?"":" err");
+  clearTimeout(toast._t);
+  toast._t=setTimeout(()=>{ t.className=""; }, 2600);
+}
 function setStatus(s){
   const b=$("statusBadge");
-  b.textContent = s || "—";
+  // 连接态与 run 状态统一中文化（P1-1: 连接三态不再是裸 connecting…）
+  const map={connecting:"连接中…",live:"已连接",closed:"已断开, 重连中…",error:"连接失败",
+    running:"运行中",paused:"已暂停",stopped:"已终止",
+    completed_exact:"成功",completed_degraded:"完成·降级"};
+  b.textContent = map[s] ?? (s || "—");
   b.className = "s-"+s;
+}
+function updateControlState(){
+  // 未选中会话时禁用控制按钮（M4: 会话下拉, 防"反馈在顶部小字被忽略"）
+  const has = !!($("monSession").value);
+  ["btnControlPause","btnControlResume","btnControlStop"].forEach(id=>{
+    const b=$(id); b.disabled = !has;
+    b.title = has ? "" : "先选择回测会话再操作";
+  });
+}
+async function refreshRuntime(){
+  // P1-1: 无运行中任务 → 显示空闲引导（区分"系统正常"与"系统坏了"）
+  try{
+    const r=await fetch("/api/runtime",{headers:apiHeaders()});
+    const j=await r.json();
+    const n=(j.runs||[]).length || (j.running||0);
+    const idle=$("monIdle");
+    if(idle) idle.style.display = (n===0 && navSeries.length===0) ? "block" : "none";
+    const rn=$("monRunning");
+    if(rn) rn.textContent = n>0 ? `运行中会话: ${n}` : "无运行中会话";
+  }catch(e){}
+}
+let monSessions=[];  // 运行中会话元数据（下拉 + 头部策略名/发起时间源）
+let monBusy=false;   // 首次加载标记（防 route 与 initMonitor 竞态双跑）
+function setMonMeta(run){
+  // 头部显示所选回测的策略名称 + 发起时间（替代 run_id）
+  $("taskName").textContent = run ? `策略: ${run.task_name || "—"}` : "—";
+  $("startedAt").textContent = run ? `发起: ${fmtTime(run.started_at)}` : "—";
+}
+async function loadSessions(preferRunId){
+  // 拉取运行中会话 → 填充下拉; preferRunId 为历史直达（已完成则补只读选项, WS journal 回放补看）
+  try{
+    const j=await fetch("/api/runtime",{headers:apiHeaders()}).then(r=>r.json());
+    monSessions=(j.runs||[]).slice().sort(
+      (a,b)=>String(a.started_at||"").localeCompare(String(b.started_at||""))
+    );
+  }catch(e){ monSessions=[]; }
+  const sel=$("monSession"), prev=sel.value;
+  sel.innerHTML = monSessions.length
+    ? monSessions.map(r=>`<option value="${esc(r.run_id)}">${esc(r.task_name||r.run_id)} · ${fmtTime(r.started_at)}</option>`).join("")
+    : `<option value="">（暂无运行中会话）</option>`;
+  let target="";
+  if(preferRunId){
+    if(!monSessions.some(r=>r.run_id===preferRunId)){
+      try{
+        const d=await fetch(`/api/runs/${encodeURIComponent(preferRunId)}`,{headers:apiHeaders()})
+          .then(r=>r.ok?r.json():null);
+        if(d){
+          const opt=document.createElement("option");
+          opt.value=preferRunId;
+          opt.textContent=`${d.task_name||preferRunId} · ${fmtTime(d.started_at)}（已完成）`;
+          sel.appendChild(opt);
+        }
+      }catch(e){}
+    }
+    target=preferRunId;
+  } else if(prev && [...sel.options].some(o=>o.value===prev)){
+    target=prev;  // 保留用户当前选择
+  } else if(monSessions.length){
+    target=monSessions[monSessions.length-1].run_id;  // 默认最新
+  }
+  sel.value=target;
+  setMonMeta(monSessions.find(r=>r.run_id===target)
+    || (target?{run_id:target, task_name:target, started_at:""}:null));
+  updateControlState();
+  return target;
+}
+function onSessionChange(runId){
+  // 切换会话: 清空旧 run 曲线/成交/日志 → 重连 WS 订阅新 run
+  if(ws){ ws.close(); ws=null; }
+  wsSeq=0; navSeries=[]; benchSeries=[]; days=0; maxDD=0; dailyRets.length=0; FILLS.length=0;
+  $("fills").querySelector("tbody").innerHTML="";
+  $("logs").innerHTML="";
+  if(chartTimer){ clearTimeout(chartTimer); chartTimer=null; }
+  if(chart) chart.setOption({series:[{data:[]},{data:[]}]});
+  setMonMeta(monSessions.find(r=>r.run_id===runId)
+    || (runId?{run_id:runId, task_name:runId, started_at:""}:null));
+  updateControlState();
+  const idle=$("monIdle"); if(idle) idle.style.display = runId ? "none" : "block";
+  connectWS();
+}
+async function syncMonitor(){
+  if(monBusy) return;
+  // 历史/提交直达: ?run= 优先; 否则保留当前选择（进入监控页刷新会话列表）
+  const fromHash = new URLSearchParams(location.hash.split("?")[1]||"").get("run");
+  const cur = fromHash || ($("monSession").value || undefined);
+  await loadSessions(cur);
+  if(!ws) connectWS();
+  if(chart) chart.resize();
 }
 function setProgress(p){
   $("barFill").style.width = Math.round((p.percent||0)*100)+"%";
@@ -223,7 +489,7 @@ function setProgress(p){
     ` · ${Math.round((p.percent||0)*100)}% · 已用 ${(p.elapsed_seconds||0).toFixed(1)}s${eta}`;
 }
 
-let chart=null, navSeries=[], benchSeries=[], firstDaily=null, days=0;
+let chart=null, navSeries=[], benchSeries=[], days=0, maxDD=0, chartTimer=null;
 const dailyRets=[];
 function ensureChart(){
   if(chart) return chart;
@@ -241,15 +507,20 @@ function ensureChart(){
   });
   return chart;
 }
+function flushChart(){
+  // 全量 setOption 增量数据（appendData 官方仅支持 scatter, 对 line 静默无效——曲线空白的根因）
+  if(!chart) return;
+  chart.setOption({series:[{data:navSeries},{data:benchSeries}]});
+}
 function onDailyNav(d){
+  const idle=$("monIdle"); if(idle) idle.style.display="none";  // 有真实数据流即收空闲引导
   days++;
   const t=new Date(d.trade_date+"T00:00:00+08:00").getTime();
   navSeries.push([t,d.nav]);
   if(d.benchmark_nav!=null) benchSeries.push([t,d.benchmark_nav]);
-  if(firstDaily==null) firstDaily=d;
-  const c=ensureChart();
-  c.appendData({seriesIndex:0,data:[[t,d.nav]]});
-  if(d.benchmark_nav!=null) c.appendData({seriesIndex:1,data:[[t,d.benchmark_nav]]});
+  if(d.drawdown!=null && d.drawdown>maxDD) maxDD=d.drawdown;  // 逐日回撤取峰（后端 mark_to_market 已算当日值）
+  ensureChart();
+  if(!chartTimer) chartTimer=setTimeout(()=>{ chartTimer=null; flushChart(); }, 200);  // 节流批量刷图
   if(navSeries.length>1){
     const prev=navSeries[navSeries.length-2][1], cur=navSeries[navSeries.length-1][1];
     dailyRets.push(cur/prev-1);
@@ -262,7 +533,7 @@ function updateMetrics(){
   const nav=last[1];
   const total=nav-1;
   const annual=Math.pow(nav, 252/Math.max(1,days))-1;
-  const dd=(firstDaily&&firstDaily.drawdown!=null)?firstDaily.drawdown:0;
+  const dd=maxDD;  // 全程最大回撤（原 firstDaily.drawdown 恒取首日 0, 显示 0.00% 的根因）
   let sharpe=null;
   if(dailyRets.length>2){
     const mean=dailyRets.reduce((a,b)=>a+b,0)/dailyRets.length;
@@ -285,16 +556,33 @@ function onFill(d){
   tbody.innerHTML="";
   FILLS.slice(0,20).forEach(f=>{
     const tr=document.createElement("tr");
+    tr.style.cursor="pointer";
+    tr.title="点击查看本笔成交明细";
     tr.innerHTML=`<td>${f.fill_time||""}</td><td>${f.code||""}</td>`+
       `<td class="${f.side}">${f.side||""}</td><td class="num">${fmt(f.price)}</td>`+
       `<td class="num">${fmt(f.volume)}</td><td class="num">${fmtMoney(f.amount)}</td>`;
+    tr.onclick=()=>{  // 横切-3: 点成交行看本笔订单明细（就近反馈）
+      toast(`成交明细 ${f.code||""} ${f.side||""} ${fmt(f.price)}×${fmt(f.volume)}`+
+        ` | 金额 ${fmtMoney(f.amount)} | 费用 ${fmt(f.total_fee)}`+
+        (f.order_id?` | 订单 ${String(f.order_id).slice(0,20)}`:""));
+    };
     tbody.appendChild(tr);
   });
 }
 function onLog(d){
+  // 策略日志: {level,message,current_dt}（log_api）; 引擎事件: {kind,...}——提取字段渲染而非原始 JSON
   const el=$("logs");
-  const line=`[${new Date().toLocaleTimeString()}] ${JSON.stringify(d)}`;
-  el.textContent = (el.textContent ? el.textContent+"\n" : "")+line;
+  const ts=d.current_dt ? String(d.current_dt).slice(0,19).replace("T"," ") : new Date().toLocaleTimeString();
+  const tag=d.level||d.kind||"sys";
+  let text;
+  if(d.message!=null) text=String(d.message);
+  else { const rest={...d}; delete rest.level; delete rest.kind; delete rest.current_dt; text=JSON.stringify(rest); }
+  const line=document.createElement("div");
+  if(d.level==="error") line.className="log-err";
+  else if(d.level==="warn"||d.level==="warning") line.className="log-warn";
+  line.textContent=`[${ts}] [${tag}] ${text}`;
+  el.appendChild(line);
+  while(el.childNodes.length>500) el.removeChild(el.firstChild);  // 上限防内存膨胀
   el.scrollTop=el.scrollHeight;
 }
 
@@ -306,21 +594,42 @@ function handle(env){
     case "daily_nav": onDailyNav(d); break;
     case "fill": onFill(d); break;
     case "log": onLog(d); break;
-    case "status": setStatus(d.status); break;
+    case "status": setStatus(d.status); onStatus(d.status, env.run_id); break;
     default: break; // order_event / corp_action / metric / committed 不渲染（单页裁剪）
   }
+}
+async function onStatus(status, runId){
+  // 终态: 立即刷图 + 用 DB 权威指标对账覆盖（9.1 三面同权; 过程值仅前端参考）
+  if(!status || !status.startsWith("completed")) return;
+  if(chartTimer){ clearTimeout(chartTimer); chartTimer=null; }
+  flushChart();
+  if(!runId) return;
+  try{
+    const r=await fetch(`/api/runs/${runId}`,{headers:apiHeaders()});
+    if(!r.ok) return;
+    const m=(await r.json()).metrics||{};
+    if(m.total_return!=null){ $("m_total").textContent=fmtPct(m.total_return); $("m_total").className=m.total_return>=0?"v up":"v down"; }
+    if(m.annual_return!=null) $("m_annual").textContent=fmtPct(m.annual_return);
+    if(m.max_drawdown!=null){
+      const dd=(typeof m.max_drawdown==="object")?m.max_drawdown.value:m.max_drawdown;
+      $("m_dd").textContent=fmtPct(dd); $("m_dd").className=dd<=0?"v down":"v";
+    }
+    if(m.sharpe!=null) $("m_sharpe").textContent=Number(m.sharpe).toFixed(2);
+  }catch(e){ /* 拉取失败保留自算值 */ }
 }
 
 // ---- WS 订阅（M4-W3: run_id 过滤 + resume 补帧 + 重连）----
 let ws=null, wsSeq=0, reconnectTimer=null;
 function connectWS(){
-  const runId = $("monRunId").value.trim() || undefined;
+  setStatus("connecting");  // P1-1: 连接发起即显示"连接中…"
+  const runId = ($("monSession").value||"").trim() || undefined;
   const params = new URLSearchParams();
   if(runId) params.set("run_id", runId);
   if(wsSeq>0) params.set("last_event_seq", String(wsSeq));
   const proto = location.protocol==="https:"?"wss://":"ws://";
   try{ ws = new WebSocket(proto+location.host+"/api/ws?"+params.toString()); }
   catch(e){ setStatus("error"); return; }
+  ws.onopen = () => { setStatus("live"); refreshRuntime(); };  // P1-1: 连接成功即"已连接"
   ws.onmessage = ev => {
     try{ const env=JSON.parse(ev.data); wsSeq=Math.max(wsSeq, env.event_seq||0); handle(env); }
     catch(e){ /* 忽略坏帧 */ }
@@ -335,11 +644,14 @@ function scheduleReconnect(){
 
 // ---- 控制按钮（REST 同权, 6.4）----
 async function control(action){
-  const runId = $("monRunId").value.trim();
-  if(!runId){ $("progText").textContent="控制需要指定 run_id"; return; }
-  const r = await fetch(`/api/runs/${runId}/${action}`, {method:"POST"});
-  const j = await r.json().catch(()=>({}));
-  $("progText").textContent = (r.ok?"✔ ":"✘ ")+(j.detail||j.status||r.status);
+  const runId = ($("monSession").value||"").trim();
+  if(!runId){ toast("请先选择回测会话再操作", false); return; }
+  try{
+    const r = await fetch(`/api/runs/${encodeURIComponent(runId)}/${action}`, {method:"POST"});
+    const j = await r.json().catch(()=>({}));
+    if(r.ok) toast(`✔ 已${({pause:"暂停",resume:"恢复",stop:"终止"})[action]}: ${runId}`);
+    else toast("✘ "+(j.detail||r.status), false);
+  }catch(e){ toast("✘ 控制请求失败: "+e.message, false); }
 }
 
 // ---- 路由（hash）----
@@ -350,21 +662,37 @@ function route(){
   const el = document.getElementById("page-"+(page||"monitor"));
   if(el) el.classList.add("active");
   document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("active", a.dataset.nav===page));
+  document.querySelector(".progress-wrap").style.display = page==="monitor" ? "" : "none";  // 进度条仅监控页
   if(page==="history") window.mtzHistory && mtzHistory.load();
   if(page==="scan") window.mtzScan && mtzScan.load();
-  if(page==="monitor" && !ws) connectWS();
+  if(page==="report"){
+    // P0-1 防静默失效: 报告模块缺失时显式报错（而非空白页）
+    if(window.mtzReport) mtzReport.load();
+    else{
+      const msg=document.getElementById("repMsg");
+      if(msg){ msg.textContent="✘ 报告模块加载失败: 前端资源版本不匹配，请按 Ctrl+F5 强制刷新后重试"; msg.style.color="var(--red)"; }
+      const f=document.getElementById("repFrame"); if(f) f.style.display="none";
+    }
+  }
+  if(page==="monitor"){ syncMonitor(); }  // 刷新会话列表 + 按需连接（隐藏页 init 的 0 尺寸修正）
 }
 window.addEventListener("hashchange", route);
+window.addEventListener("resize", ()=>{ if(chart) chart.resize(); });
 
-// 监控页初始化
+// 监控页初始化（M4: 会话选择下拉 + 策略名/发起时间, 无需手输 run_id）
 function initMonitor(){
   const runFromHash = new URLSearchParams(location.hash.split("?")[1]||"").get("run");
-  if(runFromHash) $("monRunId").value=runFromHash;
-  $("monRunId").addEventListener("change", ()=>{ if(ws){ ws.close(); ws=null; wsSeq=0; navSeries=[]; benchSeries=[]; firstDaily=null; days=0; dailyRets.length=0; } connectWS(); });
+  $("monSession").addEventListener("change", ()=>{ onSessionChange($("monSession").value); });
+  $("btnRefreshSessions").onclick = ()=>{ loadSessions($("monSession").value||undefined); };
   $("btnControlPause").onclick = ()=>control("pause");
   $("btnControlResume").onclick = ()=>control("resume");
   $("btnControlStop").onclick = ()=>control("stop");
-  connectWS();
+  monBusy=true;
+  loadSessions(runFromHash||undefined).then(()=>{
+    monBusy=false;
+    if(!ws) connectWS();
+    if(chart) chart.resize();
+  }).catch(()=>{ monBusy=false; });
 }
 initMonitor();
 route();

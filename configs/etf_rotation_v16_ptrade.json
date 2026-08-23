@@ -1,0 +1,46 @@
+{
+  "task_name": "ETF轮动V16.1平分资金_ptrade",
+  "strategy": {
+    "file": "strategies/ptrade/ETF轮动V16.1平分资金.py",
+    "type": "ptrade",
+    "entry": "handle_data"
+  },
+  "backtest": {
+    "start": "2025-01-01",
+    "end": "2026-08-01",
+    "initial_capital": 20000,
+    "benchmark": "000300.SH",
+    "frequency": "1d",
+    "initial_positions": {},
+    "strict_schedule": false,
+    "corp_actions": [
+      {"code": "515050.SH", "type": "split", "ratio": 3.0, "announce_date": "2026-05-12", "ex_date": "2026-05-13"},
+      {"code": "512480.SH", "type": "split", "ratio": 2.0, "announce_date": "2026-07-02", "ex_date": "2026-07-03"},
+      {"code": "510880.SH", "type": "cash_div", "per_share_cash": 0.142, "announce_date": "2025-01-16", "ex_date": "2025-01-21", "pay_date": "2025-01-24"},
+      {"code": "510880.SH", "type": "cash_div", "per_share_cash": 0.143, "announce_date": "2026-01-16", "ex_date": "2026-01-21", "pay_date": "2026-01-26"},
+      {"code": "512100.SH", "type": "cash_div", "per_share_cash": 0.037, "announce_date": "2025-01-10", "ex_date": "2025-01-15", "pay_date": "2025-01-20"},
+      {"code": "512100.SH", "type": "cash_div", "per_share_cash": 0.041, "announce_date": "2026-01-14", "ex_date": "2026-01-19", "pay_date": "2026-01-22"}
+    ]
+  },
+  "universe": [
+    "000300.SH",
+    "518880.SH",
+    "513100.SH",
+    "512100.SH",
+    "513520.SH",
+    "513180.SH",
+    "512480.SH",
+    "510880.SH",
+    "513030.SH",
+    "159857.SZ",
+    "515050.SH",
+    "162719.SZ"
+  ],
+  "fees": {
+    "commission_rate": 0.0001,
+    "min_commission": 5.0,
+    "stamp_tax_rate": 0.0,
+    "transfer_fee_rate": 0.0
+  },
+  "engine": {}
+}

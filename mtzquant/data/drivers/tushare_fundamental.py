@@ -33,6 +33,7 @@ from mtzquant.data.drivers.remote import register_fundamental_source
 # 源原始列（M3-R2 落盘保持此列序; 读时由 FundamentalsStore 解析）
 FINA_INDICATOR_COLS = ("ts_code", "ann_date", "end_date", "netprofit_yoy", "or_yoy")
 DAILY_BASIC_COLS = ("ts_code", "trade_date", "pe", "pb", "total_mv", "circ_mv")
+DIVIDEND_COLS = ("ts_code", "ann_date", "record_date", "ex_date", "div_proc", "cash_div_tax")
 CONSTITUENT_COLS = ("index_code", "con_code", "in_date", "out_date", "weight")
 
 
@@ -72,7 +73,11 @@ class TushareFundamentalSource:
 
     # ------------------------------------------------------------------
     def fetch_fina_indicator(self, code: str, start: date, end: date) -> pd.DataFrame:
-        """财务指标（fina_indicator, 按 ann_date 区间; 修订版本行由源全量返回）。"""
+        """财务指标（fina_indicator, 按 ann_date 区间; 保留最新修订 update_flag=1）。
+
+        tushare 对同一 (报告期, 公告日) 会返回 update_flag 0/1 两行（值相同, 新旧标记）,
+        只保留 1（最新）避免 `_clean_fund` 重复主键拒绝; 不同 ann_date 的修订版本行照常保留。
+        """
         pro = self._api()
         fn = getattr(pro, "fina_indicator", None)
         if fn is None:
@@ -85,9 +90,12 @@ class TushareFundamentalSource:
             ts_code=normalize_code(code),
             start_date=start.strftime("%Y%m%d"),
             end_date=end.strftime("%Y%m%d"),
+            fields="ts_code,ann_date,end_date,netprofit_yoy,or_yoy,update_flag",
         )
         if df is None or df.empty:
             return pd.DataFrame(columns=list(FINA_INDICATOR_COLS))
+        if "update_flag" in df.columns:
+            df = df[df["update_flag"].astype(str) == "1"]
         cols = [c for c in FINA_INDICATOR_COLS if c in df.columns]
         return df[cols]
 
@@ -110,6 +118,34 @@ class TushareFundamentalSource:
             return pd.DataFrame(columns=list(DAILY_BASIC_COLS))
         cols = [c for c in DAILY_BASIC_COLS if c in df.columns]
         return df[cols]
+
+    def fetch_dividend(self, code: str, start: date, end: date) -> pd.DataFrame:
+        """分红送配（dividend, 全历史; 仅保留「实施中」记录——对齐聚宽 STK_XR_XD）。
+
+        聚宽 `finance.STK_XR_XD` 只含已实施除权除息的记录（股权登记日/派息金额）,
+        预案/未实施不进入该表; tushare `pro.dividend` 返回全部分红公告, 故按
+        `div_proc`（实施进度）过滤。start/end 仅作幂等粗判的区间语义, 源全量返回。
+        """
+        pro = self._api()
+        fn = getattr(pro, "dividend", None)
+        if fn is None:
+            raise MtzQuantError(
+                "tushare dividend 接口不可用",
+                stage="fetch_tushare_fundamental",
+                hint="检查 tushare 版本与积分权限（3.13 分红表）",
+            )
+        df = fn(ts_code=normalize_code(code))
+        if df is None or df.empty:
+            return pd.DataFrame(columns=list(DIVIDEND_COLS))
+        cols = [c for c in DIVIDEND_COLS if c in df.columns]
+        out = df[cols].copy()
+        if "div_proc" in out.columns:
+            out = out[out["div_proc"].astype(str).str.contains("实施", na=False)]
+        # 去除缺失/非法 公告日/登记日 行（STK_XR_XD 需 a_registration_date=record_date,
+        # 缺则不可 PIT）
+        for c in ("ann_date", "record_date"):
+            out = out[out[c].astype(str).str.match(r"^\d{8}$", na=False)]
+        return out.reset_index(drop=True)
 
     def fetch_index_constituents(self, index_code: str, trade_date: date) -> pd.DataFrame:
         """指数成分快照: index_weight（该交易日成分+权重）+ index_member（入/出日期区间）。"""

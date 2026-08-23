@@ -1,6 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @date        : 2026/08/15 22:30:00
+# @update_time : 2026/08/23 10:20:00
 # @description : InstrumentProfile 品种档案（设计 5.4）：整手/t_plus/涨跌停/费率全档案化
 
 """InstrumentProfile 品种档案（设计 5.4，多品种扩展的核心）。
@@ -106,6 +107,22 @@ class InstrumentProfile:
         """整手取整：floor(数量 / lot_size) × lot_size（设计 §4.5 归一流程）。"""
         lots = math.floor(qty / self.lot_size)
         return float(lots * self.lot_size)
+
+    def sellable_lot_round(self, qty: float, held: float) -> float:
+        """卖出取整（A 股零股语义, 设计 4.5）: 整手可按 lot_size 拆分卖;
+        持仓含零股（不足一手部分）且本单请求清仓（请求量 >= 全部持仓）时,
+        一次性卖出全部含零股。
+
+        lot_round 对买入/普通卖出强制整手（floor 到 lot_size）; 但真实 A 股
+        「零股须一次性申报卖出」——若只 floor, 83 股残量会被取整成 0 被 g08
+        静默忽略, 尾仓永远卖不掉, 卡死 target_num=1 的轮动策略。故清仓场景
+        返回 held（整手+零股）, 零股不允许拆分、不允许继续买入。
+        """
+        lots = math.floor(qty / self.lot_size) * self.lot_size
+        odd = held % self.lot_size
+        if qty >= held and odd > 0:
+            return float(held)  # 清仓: 整手+零股一次性卖出
+        return float(lots)
 
     def limit_map(self, prev_close: float, *, is_st: bool = False) -> tuple[float, float]:
         """委托给 limit_rule（组合而非继承）。"""

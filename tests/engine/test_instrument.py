@@ -1,6 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @date        : 2026/08/15 22:30:00
+# @update_time : 2026/08/23 12:20:00
 # @description : T-U05 品种档案 InstrumentProfile 测试（设计 5.4）
 
 """T-U05：InstrumentProfile 品种档案（设计 5.4）：整手取整 / T+1 / 涨跌停 / 费率档案化。"""
@@ -31,6 +32,36 @@ def test_lot_round_floor_semantics() -> None:
     assert stock.lot_round(99.0) == 0.0  # 不足一手 → 空单（差量归零，设计 §4.5）
     assert etf_profile("510300.SH").lot_round(101.0) == 100.0
     assert convertible_bond_profile("113050.SH").lot_round(25.0) == 20.0
+
+
+def test_sellable_lot_round_clear_odd_lot() -> None:
+    """卖出侧零股语义: 持仓含零股且请求清仓时, 一次性卖出全部含零股（A 股规则）。
+
+    回归: order_target_value(0) 清 83 股零股尾仓 —— 旧 lot_round(83)=0 被 g08 吞单,
+    尾仓永卖不掉, 卡死 target_num=1 轮动策略（ETF轮动V16.1 近似版 2025-06-11 后停摆）。
+    """
+    etf = etf_profile("510300.SH")
+    assert etf.sellable_lot_round(83.0, 83.0) == 83.0  # 纯零股清仓
+    assert etf.sellable_lot_round(88383.0, 88383.0) == 88383.0  # 整手+零股清仓
+    assert etf.sellable_lot_round(88383.0, 88383.0) != 88300.0  # 不再被 floor 到 88300
+
+
+def test_sellable_lot_round_partial_sell_stays_round_lot() -> None:
+    """卖出侧零股语义: 非清仓请求仍按整手拆分, 零股不允许单独拆分。"""
+    etf = etf_profile("510300.SH")
+    assert etf.sellable_lot_round(450.0, 88400.0) == 400.0  # 部分卖 → 整手 floor
+    assert etf.sellable_lot_round(88400.0, 88400.0) == 88400.0  # 无零股清仓
+    assert etf.sellable_lot_round(0.0, 83.0) == 0.0  # 空量
+
+
+def test_sellable_lot_round_stock_and_cb() -> None:
+    """零股语义同样适用于股票（100 整手）与可转债（10 张整手）。"""
+    stock = stock_profile("600000.SH")
+    assert stock.sellable_lot_round(83.0, 83.0) == 83.0
+    assert stock.sellable_lot_round(450.0, 88400.0) == 400.0
+    cb = convertible_bond_profile("113050.SH")
+    assert cb.sellable_lot_round(3.0, 3.0) == 3.0  # 3 张零债一次性清仓
+    assert cb.sellable_lot_round(25.0, 30.0) == 20.0  # 部分卖 → 10 张整手
 
 
 def test_builtin_profile_parameters() -> None:

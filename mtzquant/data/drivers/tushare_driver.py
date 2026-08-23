@@ -85,19 +85,18 @@ class TushareSource:
         pro = self._api()
         if instrument_type == "etf":
             df = pro.fund_basic(market="E")
-        elif instrument_type == "stock":
-            df = pro.stock_basic(
-                exchange="",
-                list_status="L",
-                fields=("ts_code,symbol,name,area,industry,market,list_date,delist_date"),
-            )
         else:
-            # 默认股票
-            df = pro.stock_basic(
-                exchange="",
-                list_status="L",
-                fields=("ts_code,symbol,name,area,industry,market,list_date,delist_date"),
-            )
+            # 股票主数据: L(上市)+D(已退市) 全量——支撑 get_all_securities PIT 历史成分
+            frames: list[pd.DataFrame] = []
+            for status in ("L", "D"):
+                part = pro.stock_basic(
+                    exchange="",
+                    list_status=status,
+                    fields=("ts_code,symbol,name,area,industry,market,list_date,delist_date"),
+                )
+                if part is not None and not part.empty:
+                    frames.append(part)
+            df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
         return df
 
 

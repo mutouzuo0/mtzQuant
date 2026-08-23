@@ -386,4 +386,6 @@ def test_code_style_round_trip() -> None:
     assert denormalize_code("600000.XSHG") == "600000.XSHG"  # 幂等
     assert round_trip("600000.XSHG") == "600000.XSHG"
     assert round_trip("000001.XSHE") == "000001.XSHE"
-    assert denormalize_code("510300.SH", "ptrade") == "510300.XSHG"
+    # PTrade 真实外部码（4.7 修订）: 沪市 .SS, 深市 .SZ
+    assert denormalize_code("510300.SH", "ptrade") == "510300.SS"
+    assert denormalize_code("000001.SZ", "ptrade") == "000001.SZ"

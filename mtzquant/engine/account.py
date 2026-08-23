@@ -172,6 +172,40 @@ class Account:
         if pos.total_qty == 0:
             del self.positions[fill.code]  # 清仓移除
 
+    # ---------------- 挂单卖出同步入账（聚宽语义, 5.3.4 增强）----------------
+    def pending_sell(self, code: str, qty: float, proceeds: float) -> None:
+        """卖出挂单受理即入账: 持仓减量 + 回款计入可用（保持 NAV 不变式; 成交/过期再确认）。"""
+        pos = self.positions.get(code)
+        if pos is None or qty <= 0:
+            return
+        self.available_cash += proceeds
+        pos.total_qty = max(0.0, pos.total_qty - qty)
+        if pos.total_qty == 0:
+            pos.avg_cost = 0.0  # 清仓待确认: 保留 Position 占位（成本/估值价供过期恢复）
+
+    def apply_sell_credited(self, fill: Fill, order_qty: float, est: float) -> None:
+        """挂单卖出的成交确认: 成交回款补差（实际-预估）, 恢复未成交部分。"""
+        un_filled = max(0.0, order_qty - fill.volume)
+        if un_filled > 0:
+            pos = self.positions.get(fill.code)
+            if pos is not None:
+                pos.total_qty += un_filled  # 受理时按全量预减, 恢复未成交部分
+        self.available_cash += (fill.amount - fill.total_fee) - est
+        pos = self.positions.get(fill.code)
+        if pos is not None and pos.total_qty <= 0:
+            del self.positions[fill.code]
+
+    def restore_pending_sell(self, code: str, qty: float, est: float) -> None:
+        """卖出挂单过期/撤销: 恢复持仓、退回预估回款。"""
+        pos = self.positions.get(code)
+        if pos is None:
+            pos = Position(code=code)
+            self.positions[code] = pos
+        pos.total_qty += qty
+        self.available_cash -= est
+        if pos.total_qty <= 0:
+            del self.positions[code]
+
     # ---------------- 公司行为接口（B8 调用）----------------
 
     def credit_dividend(self, amount: float) -> None:

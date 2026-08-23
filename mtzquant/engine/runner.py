@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/23 12:00:00
 # @description : I1 runner.run_task：会话装配 → 引擎驱动 → 导出 → DB 入库（设计 5.1/8.8/9.1）
 
 """run_task（阶段 I 生产路径）——CLI `mtzquant run` 的核心编排。
@@ -40,6 +40,7 @@ from mtzquant.data.provider import MarketDataProvider
 from mtzquant.engine.engine import UnifiedBacktestEngine
 from mtzquant.engine.export import ExportBundle, RunStore
 from mtzquant.engine.manifest import build_manifest, config_hash
+from mtzquant.engine.preflight import detect_codes
 from mtzquant.engine.results import FlushPolicy, ResultStore
 from mtzquant.engine.session import BacktestSession, TaskConfig, normalize_universe
 from mtzquant.store.models import init_db
@@ -136,8 +137,7 @@ def run_task(
     control_path（M4-W2, 6.4）: 控制文件路径（Web/CLI pause/stop 同权）。
     """
     t0 = time.perf_counter()
-    pipeline = build_pipeline(settings, task.universe)
-    t_load = time.perf_counter()
+    # 先读策略源码: universe 为空时据此自动提取标的（预检 detect_codes, 表单/CLI 无需手填标的池）
     strategy_path = Path(task.strategy.file)
     if not strategy_path.is_file():
         raise MtzQuantError(
@@ -146,6 +146,10 @@ def run_task(
             hint="task.json 的 strategy.file 为相对仓库根或绝对路径",
         )
     strategy_code = strategy_path.read_text(encoding="utf-8")
+    if not task.universe:
+        task.universe = detect_codes(strategy_code)
+    pipeline = build_pipeline(settings, task.universe)
+    t_load = time.perf_counter()
 
     task_dict = json.loads(task.model_dump_json())
     if run_id is None:
@@ -217,6 +221,7 @@ def run_task(
 
     # 状态聚合（引擎 one_word + 会话 day 过期; 8.8 语义保真）
     degradations = list(engine.degradations) + list(snapshot["degradations"])
+    frictions = list(engine.frictions)  # 撮合摩擦（N1: 不参与降级判定）
     status = engine.status
     if status == "completed_exact" and degradations:
         status = "completed_degraded"
@@ -240,6 +245,7 @@ def run_task(
         fees=snapshot["fees"],
         status=status,
         degradations=degradations,
+        frictions=frictions,
         manifest=manifest,
         task=task_dict,
         strategy_code=strategy_code,
@@ -330,11 +336,16 @@ def _task_strategy_file(task: dict[str, Any] | None) -> str:
 
 
 def _metrics_json(bundle: ExportBundle) -> str:
-    """summary 的 metrics 部分序列化（8.4; list --sort sharpe 读取）。"""
+    """summary 的 metrics 部分序列化（8.4; list --sort sharpe 读取; N1 附降级/摩擦计数）。"""
     store = RunStore()
     summary = store.compute_summary(bundle)
     return json.dumps(
-        {"metrics": summary.get("metrics", {}), "status": bundle.status},
+        {
+            "metrics": summary.get("metrics", {}),
+            "status": bundle.status,
+            "degradation_count": len(bundle.degradations),
+            "friction_count": len(bundle.frictions),
+        },
         ensure_ascii=False,
         sort_keys=True,
     )

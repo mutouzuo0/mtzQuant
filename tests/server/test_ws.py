@@ -1,15 +1,16 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 09:20:00
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/18 23:25:00
 # @description : T-W01a..d：W0 最小可视版——app 装配/WS 信封一致+多客户端/桥接 fan-out/页面覆盖
 """T-W01（M2-W0 Web 最小可视版）——fastapi TestClient + 真实 BacktestRuntime。
 
 覆盖:
   T-W01a  app 装配: GET / 单页 / /api/runtime / /static/vendor/echarts.min.js
-  T-W01b  WS 信封与 ResultStore 逐字段一致（6.3 冻结字段名）+ 多客户端 + seq 单调 + committed 快照
+  T-W01b  WS 信封与 ResultStore 逐字段一致（6.3 冻结字段名） + 多客户端 + seq 单调 + committed 快照
   T-W01c  会话桥接: 事件实时 fan-out 到 WS 订阅者（跨线程 call_soon_threadsafe 路径）
-  T-W01d  页面逻辑: 各事件类型消费分支齐全（progress/daily_nav/fill/log/status）+ appendData 增量
+  T-W01d  页面逻辑: 各事件类型消费分支齐全（progress/daily_nav/fill/log/status）
+        + 净值增量 setOption（appendData 对 line 系列无效, 已弃用）
 """
 
 from __future__ import annotations
@@ -131,6 +132,7 @@ def test_page_event_handlers() -> None:
     html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
     for t in ("progress", "daily_nav", "fill", "log", "status"):
         assert f'case "{t}"' in html, f"页面缺 {t} 消费分支"
-    assert "appendData" in html  # 净值增量绘制
+    # 净值节流全量刷新（appendData 对 line 无效, 已弃用）
+    assert "flushChart" in html and "setOption({series:" in html
     assert "new WebSocket" in html  # WS 订阅入口
     assert "mtzquant report" in html  # 终态提示

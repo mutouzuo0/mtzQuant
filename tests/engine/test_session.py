@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 21:59:08
-# @description : I1 BacktestSession 生产会话测试：买卖记账/初始持仓/T+1 拒单（设计 5.1/4.5）
+# @update_time        : 2026/08/23 12:20:00
+# @description : I1 BacktestSession 会话测试：买卖记账/T+1 拒单/零股清仓（设计 5.1/4.5）
 
 """BacktestSession 组件测试（阶段 I 生产路径）。
 
@@ -88,6 +88,69 @@ def test_session_t1_sell_rejected_same_day(tmp_path: Path) -> None:
     assert sell[0]["reject_reason"] == "t_plus_sell_unavailable"
     # 买入本身成功
     assert any(o["status"] == "filled" for o in b.orders)
+
+
+ODD_LOT_CLEAR_STRATEGY = """\
+def initialize(context):
+    context.g["code"] = "510300.SH"
+    context.g["bars"] = 0
+
+
+def on_bar(context, bar):
+    context.g["bars"] += 1
+    if context.g["bars"] == 1:
+        context.adapter.order_target_value(context.g["code"], 0.0)
+"""
+
+
+def test_session_odd_lot_residual_can_be_cleared(tmp_path: Path) -> None:
+    """零股尾仓可一次性清空（回归: ETF轮动V16.1 近似版 2025-06-11 后停摆根因）。
+
+    旧逻辑 order_target_value(0) 对 83 股取 lot_round(83)=0 → 被 g08 静默忽略,
+    尾仓永卖不掉、买入门 current_hold_size < target_num 恒 False → 全区间停摆。
+    """
+    env = make_backtest_env(tmp_path, strategy_text=ODD_LOT_CLEAR_STRATEGY)
+    env.task.backtest.initial_positions = {CODE: 83.0}
+    result = run_task(env.task, settings=env.settings, out_root=env.out_root, persist=False)
+    b = result.bundle
+    # 清仓卖单按 83 股全额成单（不再被取整吞掉）
+    sells = [o for o in b.orders if o["side"] == "sell"]
+    assert sells and sells[0]["qty"] == 83.0
+    assert sells[0]["status"] == "filled"
+    fills = [f for f in b.fills if f["side"] == "sell"]
+    assert fills and fills[0]["volume"] == 83.0
+    # 末态无持仓
+    last = b.navs[-1]
+    assert last["open_positions"] == 0
+    assert last["positions_value"] == pytest.approx(0.0, abs=1e-6)
+
+
+BUY_83_STRATEGY = """\
+def initialize(context):
+    context.g["code"] = "510300.SH"
+    context.g["bars"] = 0
+
+
+def on_bar(context, bar):
+    context.g["bars"] += 1
+    if context.g["bars"] == 1:
+        # 目标金额 = 83 股 × 10.0 元 —— 不足一手, 买入侧仍强制整手 → 空单忽略
+        context.adapter.order_target_value(context.g["code"], 830.0)
+"""
+
+
+def test_session_buy_side_stays_round_lot(tmp_path: Path) -> None:
+    """买入侧仍强制整手: 目标不足一手（83 股）→ 空单 g08 忽略, 不产生持仓。
+
+    与卖出零股语义对照 —— 只放行"一次性清空", 不允许买入零股（设计 4.5）。
+    """
+    env = make_backtest_env(tmp_path, strategy_text=BUY_83_STRATEGY)
+    result = run_task(env.task, settings=env.settings, out_root=env.out_root, persist=False)
+    b = result.bundle
+    assert not any(o["side"] == "buy" for o in b.orders)  # 无买入订单
+    last = b.navs[-1]
+    assert last["open_positions"] == 0
+    assert last["positions_value"] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_task_config_validation(tmp_path: Path) -> None:

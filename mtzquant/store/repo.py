@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 03:16:00
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/23 12:00:00
 # @description : G3 store/repo.py：RunRepo（run 创建/快照复用/软删除/purge）+ DetailRepo（批量插入）
 
 """仓储层（设计 8.3/8.7）——SQL 访问的唯一入口。
@@ -49,6 +49,41 @@ def _sharpe_from_metrics(metrics_json: str | None) -> float | None:
         return data.get("metrics", {}).get("sharpe")
     except (json.JSONDecodeError, AttributeError):
         return None
+
+
+def _metrics_cols(metrics_json: str | None) -> dict[str, Any]:
+    """从 metrics_json 提取历史列表 KPI 列（M4: 总收益/年化/最大回撤/夏普; 缺失 → None）。"""
+    cols: dict[str, Any] = {
+        "sharpe": None,
+        "total_return": None,
+        "annual_return": None,
+        "max_drawdown": None,
+    }
+    if not metrics_json:
+        return cols
+    try:
+        metrics = json.loads(metrics_json).get("metrics", {})
+        cols["sharpe"] = metrics.get("sharpe")
+        cols["total_return"] = metrics.get("total_return")
+        cols["annual_return"] = metrics.get("annual_return")
+        dd = metrics.get("max_drawdown")
+        cols["max_drawdown"] = dd.get("value") if isinstance(dd, dict) else dd
+        return cols
+    except (json.JSONDecodeError, AttributeError):
+        return cols
+
+
+def _metrics_note(status: str | None, cols: dict[str, Any]) -> str | None:
+    """P0-2: 已完成但 KPI 全空 → 给出原因（不再是无声「—」; 前端 hover 展示）。"""
+    kpi_keys = ("sharpe", "total_return", "annual_return", "max_drawdown")
+    if any(cols.get(k) is not None for k in kpi_keys):
+        return None
+    st = status or ""
+    if st.startswith("completed"):
+        return "该 run 未写入绩效指标（旧版引擎或未落库），可点「报告」查看或重跑"
+    if st in ("running", "paused"):
+        return "运行中，完成后自动写入指标"
+    return "该 run 未落库指标"
 
 
 class RunRepo:
@@ -151,41 +186,31 @@ class RunRepo:
     def list_runs(
         self, *, sort_by: str = "started_at", limit: int = 50, include_eliminated: bool = False
     ) -> list[dict[str, Any]]:
-        """列出 run（M3-U3: 默认折叠被淘汰候选, --include-eliminated 显式显示, 5.8.2）。"""
-        order = {
-            "started_at": BacktestRun.started_at.desc(),
-            "sharpe": None,  # 需关联 metrics, 单独处理
-        }
+        """列出 run（M3-U3: 默认折叠被淘汰候选, --include-eliminated 显式显示, 5.8.2）。
+
+        M4: 一律 LEFT JOIN metrics 附加 KPI 列（sharpe/total_return/annual_return/max_drawdown）,
+        Web 历史页与 CLI 同源（9.1）; sort_by=sharpe 时无指标行沉底（8.4）。
+        """
         not_elim = BacktestRun.eliminated_reason.is_(None)
         with Session(self.engine, expire_on_commit=False) as s:
+            rows = s.execute(
+                select(BacktestRun, BacktestMetrics.metrics_json)
+                .join(BacktestMetrics, BacktestRun.id == BacktestMetrics.run_id, isouter=True)
+                .where(BacktestRun.deleted_at.is_(None))
+                .where(not_elim if not include_eliminated else True)  # type: ignore[arg-type]
+                .order_by(BacktestRun.started_at.desc())
+                .limit(limit)
+            ).all()
+            runs: list[dict[str, Any]] = []
+            for run, metrics_json in rows:
+                d = self._run_dict(run)
+                cols = _metrics_cols(metrics_json)
+                d.update(cols)
+                d["metrics_note"] = _metrics_note(run.status, cols)  # P0-2 指标缺失原因
+                runs.append(d)
             if sort_by == "sharpe":
-                rows = s.execute(
-                    select(BacktestRun, BacktestMetrics.metrics_json)
-                    .join(BacktestMetrics, BacktestRun.id == BacktestMetrics.run_id, isouter=True)
-                    .where(BacktestRun.deleted_at.is_(None))
-                    .where(not_elim if not include_eliminated else True)  # type: ignore[arg-type]
-                    .order_by(BacktestRun.started_at.desc())
-                    .limit(limit)
-                ).all()
-                runs: list[dict[str, Any]] = []
-                for run, metrics_json in rows:
-                    d = self._run_dict(run)
-                    d["sharpe"] = _sharpe_from_metrics(metrics_json)
-                    runs.append(d)
                 runs.sort(key=lambda r: (r.get("sharpe") is None, -(r.get("sharpe") or 0.0)))
-                return runs
-            run_rows = (
-                s.execute(
-                    select(BacktestRun)
-                    .where(BacktestRun.deleted_at.is_(None))
-                    .where(not_elim if not include_eliminated else True)  # type: ignore[arg-type]
-                    .order_by(order.get(sort_by, BacktestRun.started_at.desc()))
-                    .limit(limit)
-                )
-                .scalars()
-                .all()
-            )
-            return [self._run_dict(r) for r in run_rows]
+            return runs
 
     @staticmethod
     def _run_dict(run: BacktestRun) -> dict[str, Any]:
@@ -295,6 +320,22 @@ class RunRepo:
                 return None
             snap = s.get(StrategySnapshot, run.strategy_snapshot_id)
             return snap.code_text if snap is not None else None
+
+    def get_snapshot_info(self, run_id: str) -> dict[str, Any] | None:
+        """读取该 run 策略快照元信息（源码/文件名/sha256/行数, Web 源码查看用）。"""
+        with Session(self.engine, expire_on_commit=False) as s:
+            run = s.get(BacktestRun, run_id)
+            if run is None:
+                return None
+            snap = s.get(StrategySnapshot, run.strategy_snapshot_id)
+            if snap is None:
+                return None
+            return {
+                "file_name": snap.file_name,
+                "code": snap.code_text,
+                "sha256": snap.sha256,
+                "line_count": snap.line_count,
+            }
 
     def lineage(self) -> list[dict[str, Any]]:
         """全量 run 谱系节点（含 parent_run_id/收益摘要, P2 lineage 用）。"""

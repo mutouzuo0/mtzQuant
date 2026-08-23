@@ -61,6 +61,10 @@ class RemoteFundamentalSource(Protocol):
         """拉取每日估值（pe/pb/市值, 按 trade_date 区间）。"""
         ...
 
+    def fetch_dividend(self, code: str, start: date, end: date) -> pd.DataFrame:
+        """拉取分红送配（现金红利等, 按 ann_date/record_date 区间; 实施中记录）。"""
+        ...
+
     def fetch_index_constituents(self, index_code: str, trade_date: date) -> pd.DataFrame:
         """拉取指数成分快照（某交易日成分 + 权重 + 入/出日期区间, 3.13）。"""
         ...

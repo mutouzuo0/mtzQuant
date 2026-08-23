@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/23 12:30:00
 # @description : J mtzQuant report.html：自包含报告（指标卡/交互净值图/成交分页, 9.2）
 
 """report.html（设计 9.2）——自包含单文件回测报告。
@@ -598,14 +598,25 @@ def _render_html(
             for k, v in card.items()
         )
 
-    # 语义保真
+    # 语义保真（N1/N2: 降级=语义事件; 摩擦=cash_capped 缩量, 不影响完成状态）
     fidelity = (
         '<span class="badge ok">completed_exact</span>'
         if status == "completed_exact"
         else '<span class="badge warn">completed_degraded</span>'
     )
+    frictions = summary.get("frictions", []) or []
     deg_items = (
         "".join(f"<li>{html.escape(str(d))}</li>" for d in degradations[:50]) or "<li>无降级</li>"
+    )
+    friction_items = "".join(f"<li>{html.escape(str(f))}</li>" for f in frictions[:200])
+    friction_list_section = (
+        (
+            '<details><summary style="cursor:pointer">撮合摩擦明细（'
+            f"{len(frictions)} 笔缩量部分成交, 默认折叠——不影响完成状态）</summary>"
+            f'<ul style="max-height:360px;overflow-y:auto">{friction_items}</ul></details>'
+        )
+        if frictions
+        else ""
     )
 
     # 成交表（分页, 每页 100 条; 无 order_id 列, 倒序=最新在前）
@@ -685,7 +696,7 @@ def _render_html(
    run_id: {html.escape(run_id)} ·
    metrics_version: {html.escape(str(summary.get("metrics_version", _METRICS_VERSION)))}</p>
 
-<h2>指标卡（gross / net 双口径, 8.4）</h2>
+<h2>指标卡（gross / net 双口径）</h2>
 <div class="cards"><div class="card" style="grid-column:1/-1"><div class="k">语义保真</div>
   <div class="v" style="font-size:14px">{fidelity}
   <span class="muted">最大回撤峰/谷: {peak} → {trough}</span></div></div></div>
@@ -697,8 +708,11 @@ def _render_html(
 <h2>净值 + 回撤（悬浮查看数值 · ↑/↓ 缩放时间轴）</h2>
 {_render_nav_chart_html(navs)}
 
-<h2>语义保真声明（降级清单, 4.9.2）</h2>
+<h2>语义保真声明（降级与撮合摩擦）</h2>
+<p class="dim">共 {len(degradations)} 条语义降级 · {len(frictions)} 笔撮合摩擦
+（缩量部分成交, 不影响完成状态）。</p>
 <ul>{deg_items}</ul>
+{friction_list_section}
 
 <h2>成交明细（每页 100 条）</h2>
 {orders_section}
@@ -708,7 +722,7 @@ def _render_html(
 {friction_section}
 
 <h2>指标口径附注</h2>
-<p class="muted">8.4 公式: 年化=nav^(250/n)-1（ANN=250）; 波动 ddof=1;
+<p class="muted">指标公式: 年化=nav^(250/n)-1（ANN=250）; 波动 ddof=1;
         索提诺 TDD=√(mean(min(r-MAR,0)²));
 最大回撤含峰谷日; 夏普 rf=0; 指标版本
         {html.escape(str(summary.get("metrics_version", _METRICS_VERSION)))}。

@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 10:40:00
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/23 10:30:00
 # @description : L1-L3 PTrade 官方对象投影：Context/Portfolio/Position/Order/BarData（4.7）
 
 """PTrade 官方对象投影（设计 4.7 / 附录C）。
@@ -207,5 +207,5 @@ def make_bar_data(
 
 
 def ptrade_symbol(code: str) -> str:
-    """内部码 → PTrade 外部码（XSHG/XSHE, 4.7）。"""
-    return denormalize_code(code)
+    """内部码 → PTrade 外部码（沪市 .SS / 深市 .SZ, 4.7 修订）。"""
+    return denormalize_code(code, platform="ptrade")

@@ -28,7 +28,7 @@ import os
 import tempfile
 import time as time_mod
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -45,6 +45,26 @@ from mtzquant.data.ratelimit import RateLimitController, RetryPolicy
 
 # 落盘统一源格式列（3.5; 与 fetch_etf 一致, 读时归一）
 TUSHARE_KLINE_COLS = ("ts_code", "trade_date", "open", "high", "low", "close", "vol", "amount")
+
+
+def _fund_date_col(table: str) -> str:
+    """基本面表的日期列（幂等粗判/归一校验用; dividend 用公告日 ann_date）。"""
+    if table == "daily_basic":
+        return "trade_date"
+    return "ann_date"  # fina_indicator / dividend
+
+
+def _fund_key(table: str) -> list[str]:
+    """基本面表的主键（去重/修订版本行语义）。
+
+    dividend 主键含 record_date/ex_date: 同一公告日(ann_date)可能含送股+派息多条记录,
+    （ann_date, record_date, ex_date）共同区分独立分红事件; 重复行由 _merge_fund 保留末条。
+    """
+    if table == "fina_indicator":
+        return ["end_date", "ann_date"]
+    if table == "dividend":
+        return ["ann_date", "record_date", "ex_date", "cash_div_tax"]
+    return ["trade_date"]  # daily_basic
 
 
 def instrument_type_of(code: str) -> str:
@@ -71,7 +91,7 @@ def _year_slices(start: date, end: date, batch_days: int) -> list[tuple[date, da
 
 @dataclass
 class FetchReport:
-    """单标的下载报告（CLI 输出, 3.9）。"""
+    """单标的下载报告（CLI 输出, 3.9; M4 覆盖语义: 已有/缺失/将下载, P2-2）。"""
 
     code: str
     status: str = "ok"  # ok | skipped | dry_run | failed
@@ -81,6 +101,12 @@ class FetchReport:
     merged_end: str = ""
     source: str = ""
     reason: str = ""
+    # 覆盖语义（P2-2: 让用户一眼看懂「已有什么 / 缺什么 / 将下载多少」）
+    covered_count: int = 0  # 本地已有交易日数
+    covered_start: str = ""  # 本地已有最早交易日
+    covered_end: str = ""  # 本地已有最晚交易日
+    missing_days: int = 0  # 请求区间内缺失交易日数（将下载量）
+    missing_segments: list[str] = field(default_factory=list)  # 缺失段格式化（≤3 段）
 
 
 @dataclass
@@ -365,8 +391,11 @@ class DataFetcher:
             gaps = checker.gaps(code, start, end)
             if dry_run:
                 report.status = "dry_run"
-                report.reason = f"缺失段 {len(gaps)} 个" + (
-                    f"（{_fmt_range(gaps[0])} …）" if gaps else "（已全覆盖）"
+                self._apply_coverage(report, checker, gaps, start, end)
+                report.reason = f"缺失 {report.missing_days} 个交易日" + (
+                    f"（前 3 段: {'、'.join(report.missing_segments)} …）"
+                    if report.missing_days
+                    else ""
                 )
                 return report
             if not gaps:
@@ -404,6 +433,7 @@ class DataFetcher:
             report.source = source_used
             report.merged_start = mlo or ""
             report.merged_end = mhi or ""
+            self._apply_coverage(report, checker, gaps, start, end)  # P2-2: 覆盖语义同源填充
             self._invalidate_cache(code)  # ⑥
             self._master.upsert(
                 [InstrumentRow(code=code, instrument_type=typ, exchange=code.rsplit(".", 1)[-1])]
@@ -420,6 +450,28 @@ class DataFetcher:
             report.status = "failed"
             report.reason = f"{type(exc).__name__}: {exc}"
             return report
+
+    @staticmethod
+    def _apply_coverage(
+        report: FetchReport,
+        checker: CoverageChecker,
+        gaps: list[tuple[date, date]],
+        start: date,
+        end: date,
+    ) -> None:
+        """填充覆盖语义字段（P2-2: 已有 N 天 / 将下载 M 天 / 缺失段前 3 段）。
+
+        让「检查覆盖」结果一句话说清: 已有 2020-01-02~2023-12-29 共 x 天,
+        缺失 y 个交易日（列前 3 段）, 确认后补齐。
+        """
+        cov = checker.coverage(report.code)
+        report.covered_count = cov.count
+        if cov.min_dt is not None:
+            report.covered_start = cov.min_dt.isoformat()
+        if cov.max_dt is not None:
+            report.covered_end = cov.max_dt.isoformat()
+        report.missing_days = sum(checker.day_count(lo, hi) for lo, hi in gaps)
+        report.missing_segments = [_fmt_range(g) for g in gaps[:3]]
 
     def _download_slice(
         self, code: str, typ: str, start: date, end: date
@@ -502,13 +554,21 @@ class DataFetcher:
 
     @staticmethod
     def _map_master_rows(df: pd.DataFrame, instrument_type: str | None) -> list[InstrumentRow]:
-        """源原始列 → InstrumentRow（ts_code → 归一 code, name, list_date, 3.11）。"""
+        """源原始列 → InstrumentRow（ts_code → 归一 code, name, list_date, 3.11）。
+
+        无法归一的特殊代码（如退市整理期 T 前缀）跳过, 不阻断整表主数据拉取。
+        """
         rows: list[InstrumentRow] = []
+        skipped = 0
         for _, r in df.iterrows():
             raw_code = str(r.get("ts_code") or r.get("code") or r.get("symbol") or "").strip()
             if not raw_code:
                 continue
-            code = normalize_code(raw_code)
+            try:
+                code = normalize_code(raw_code)
+            except Exception:  # noqa: BLE001 - 特殊代码（T 前缀等）跳过
+                skipped += 1
+                continue
             rows.append(
                 InstrumentRow(
                     code=code,
@@ -519,6 +579,8 @@ class DataFetcher:
                     delist_date=str(r.get("delist_date") or "").strip(),
                 )
             )
+        if skipped:
+            print(f"[fetch_master] 跳过 {skipped} 个无法归一的特殊代码")
         return rows
 
     # ------------------------------------------------------------------
@@ -544,10 +606,15 @@ class DataFetcher:
         """
         from mtzquant.data.drivers.tushare_fundamental import (
             DAILY_BASIC_COLS,
+            DIVIDEND_COLS,
             FINA_INDICATOR_COLS,
         )
 
-        known = {"fina_indicator": FINA_INDICATOR_COLS, "daily_basic": DAILY_BASIC_COLS}
+        known = {
+            "fina_indicator": FINA_INDICATOR_COLS,
+            "daily_basic": DAILY_BASIC_COLS,
+            "dividend": DIVIDEND_COLS,
+        }
         if table not in known:
             raise MtzQuantError(
                 f"未知财务表 {table!r}", stage="fetcher", hint=f"可选: {sorted(known)}"
@@ -639,6 +706,8 @@ class DataFetcher:
             return src.fetch_fina_indicator(code, start, end)
         if table == "daily_basic":
             return src.fetch_daily_basic(code, start, end)
+        if table == "dividend":
+            return src.fetch_dividend(code, start, end)
         raise MtzQuantError(f"未知财务表 {table!r}", stage="fetcher")
 
     @staticmethod
@@ -659,7 +728,7 @@ class DataFetcher:
                 stage="fetcher",
                 hint=f"期望列: {cols}",
             )
-        date_col = "ann_date" if table == "fina_indicator" else "trade_date"
+        date_col = _fund_date_col(table)
         dts = pd.to_datetime(df[date_col], format="%Y%m%d", errors="coerce")
         if dts.isna().any():
             raise MtzQuantError(
@@ -667,8 +736,9 @@ class DataFetcher:
                 stage="fetcher",
                 hint="源返回了非法日期（3.13）",
             )
-        key = ["end_date", "ann_date"] if table == "fina_indicator" else ["trade_date"]
-        if df.duplicated(subset=key).any():
+        key = _fund_key(table)
+        if table != "dividend" and df.duplicated(subset=key).any():
+            # dividend 允许同公告多分红记录（送股+派息同 ann_date）; 其余表重复主键拒绝
             raise MtzQuantError(
                 f"基本面下载含重复主键 {key}: {code}/{table}, 拒绝写盘",
                 stage="fetcher",
@@ -678,10 +748,7 @@ class DataFetcher:
 
     def _merge_fund(self, path: Path, new_df: pd.DataFrame, table: str) -> tuple[pd.DataFrame, int]:
         """旧文件 + 新数据按主键去重合并（修订版本行保留: fina_indicator 主键含 ann_date）。"""
-        if table == "fina_indicator":
-            key = ["ts_code", "end_date", "ann_date"]
-        else:
-            key = ["ts_code", "trade_date"]
+        key = ["ts_code", *(_fund_key(table))]
         if not path.is_file():
             merged = new_df.copy()
             merged = merged.drop_duplicates(subset=key, keep="last").sort_values(key[-1])
@@ -702,7 +769,7 @@ class DataFetcher:
     def _fund_local_days(path: Path, table: str) -> set[date]:
         """本地基本面文件已有日期（幂等粗判; 读取失败 → 空集）。"""
         try:
-            col = "ann_date" if table == "fina_indicator" else "trade_date"
+            col = _fund_date_col(table)
             df = pd.read_csv(path, usecols=[col], dtype=str, keep_default_na=False)
             dts = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce").dropna()
             return {d.date() for d in dts}
@@ -887,4 +954,5 @@ def _df_to_temp_csv(df: pd.DataFrame, code: str, root: Path) -> str:
 
 
 def _fmt_range(r: tuple[date, date]) -> str:
-    return f"{r[0]}~{r[1]}"
+    """缺失段格式化: 单日缺只显示当天（P2-2: 消除 `2020-01-01~2020-01-01` 零长度歧义）。"""
+    return str(r[0]) if r[0] == r[1] else f"{r[0]}~{r[1]}"

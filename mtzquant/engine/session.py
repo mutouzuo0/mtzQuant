@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/23 12:00:00
 # @description : F5/I1 BacktestSession：生产化会话 + 任务配置解析（3.6/5.1）; W0 emit + K4 视图
 
 """BacktestSession（设计 5.1 SessionPort 的生产实现，阶段 I 提炼自 golden DailyDriver）。
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -64,6 +65,9 @@ _SH = ZoneInfo("Asia/Shanghai")
 
 # 买入侧方向（冻结可用资金; 卖出不冻结, 5.3.4）
 _BUY_SIDES = frozenset({OrderDirection.BUY, OrderDirection.OPEN_LONG, OrderDirection.CLOSE_SHORT})
+_SELL_SIDES = frozenset(
+    {OrderDirection.SELL, OrderDirection.CLOSE_LONG, OrderDirection.CLOSE_SHORT}
+)
 
 
 # ============================================================
@@ -106,7 +110,7 @@ class TaskConfig(BaseModel):
     task_name: str
     strategy: StrategySpec
     backtest: BacktestSpec
-    universe: list[str]
+    universe: list[str] = Field(default_factory=list)  # 可空: runner 从策略源码自动提取
     fees: FeeSpec = Field(default_factory=FeeSpec)
     engine: dict[str, Any] = Field(default_factory=dict)  # 撮合覆盖项（M5 增强, 预留）
 
@@ -190,6 +194,8 @@ class BacktestSession:
         self._order_seq = 0
         self.status = "completed_exact"
         self._frozen_by_order: dict[str, float] = {}  # order_id → 账户冻结额（买入, 5.3.4）
+        # order_id → (code, qty, est 回款): 挂单卖出同步入账待确认
+        self._pending_sell_by_order: dict[str, tuple[str, float, float]] = {}
         self._pending_sync: list[tuple[OrderRequest, Order | None]] = []  # M2: 受理后回执对齐
         self._benchmark_close: dict[str, float] = {}
         self._order_book: Any = None  # 惰性（order_book 属性首次访问创建, 引擎装配后可用）
@@ -224,6 +230,14 @@ class BacktestSession:
         ctx.emit = self.emit
         ctx.task = self.task
         ctx.calendar = self._calendar
+        # M3: 主数据路径（get_all_securities PIT / 名称 / ST 判定; 经 driver settings 解析）
+        _driver = getattr(self._provider, "_driver", None)
+        _ds = getattr(_driver, "settings", None)
+        ctx.master_path = (
+            str(Path(_ds.root_path) / "master" / "instruments.csv")
+            if _ds is not None
+            else "data/master/instruments.csv"
+        )
         ctx.current_dt = lambda: self._current_dt
         ctx.now_fn = lambda: self._current_dt  # M2: 适配器取当前回测时刻（动态, 每 bar 更新）
         ctx.phase = lambda: self._phase
@@ -490,8 +504,8 @@ class BacktestSession:
             today = bar is not None and not bar.suspended and not self._is_delisted(code, day)
             if not today:
                 stale.append(code)
-            else:
-                open_pos += 1
+            elif pos.total_qty > 0:
+                open_pos += 1  # 仅计真实持仓（挂单卖出 0 量占位不计, 5.3.4）
             pos.last_price = closes.get(code, pos.last_price)
             positions_value += pos.market_value
         total_cash = self._account.total_cash
@@ -533,20 +547,49 @@ class BacktestSession:
                     self._emit("log", {"kind": "dividend_settled", "amount": amount})
 
     def orders_to_book(self, orders: list[Order]) -> None:
-        """账本受理（5.3.1 accept: 买入冻结可用资金; 现金不足 → REJECTED）。"""
-        for order in orders:
-            if order.status is OrderStatus.REJECTED:
-                continue  # 前置校验已拒（T+1/空量）
+        """账本受理（5.3.1 accept: 买入冻结可用资金; 现金不足 → REJECTED）。
+
+        聚宽同步卖出语义（M3-N6）: **卖单先受理并即时入账**——持仓减量 + 回款计入
+        可用现金, 使同批买入可等分"卖出回款+现金"（原版等分现金策略依赖此语义）;
+        成交时补差（实际-预估）, 过期/撤销恢复。
+        """
+        live = [o for o in orders if o.status is not OrderStatus.REJECTED]
+        for order in live:
+            if order.side in _BUY_SIDES:
+                continue  # 买单在卖单之后受理（回款已入账）
             ev = self.order_book.accept(
                 order,
                 available_cash=self._account.available_cash,
                 ref_price=self._px(order.code),
                 commission_rate=self._fee_params.commission_rate,
                 min_commission=self._fee_params.commission_min,
+                slippage_ratio=0.0,
             )
             if ev is not None:
                 self._record_event(ev)
-                if ev.event_type is OrderEventType.ACCEPTED and order.side in _BUY_SIDES:
+                if ev.event_type is OrderEventType.ACCEPTED:
+                    pos = self._account.positions.get(order.code)
+                    est = order.qty * (
+                        pos.last_price if pos and pos.last_price else self._px(order.code)
+                    )
+                    self._account.pending_sell(order.code, order.qty, est)
+                    self._pending_sell_by_order[order.order_id] = (order.code, order.qty, est)
+        for order in live:
+            if order.side not in _BUY_SIDES:
+                continue
+            ev = self.order_book.accept(
+                order,
+                available_cash=self._account.available_cash,
+                ref_price=self._px(order.code),
+                commission_rate=self._fee_params.commission_rate,
+                min_commission=self._fee_params.commission_min,
+                # 按现价冻结（不含滑点）——对齐聚宽: 策略等分现金时最后一单冻结≈可用;
+                # 滑点/跳空导致的超现金由引擎成交侧缩量部分成交兜底（5.3.4）。
+                slippage_ratio=0.0,
+            )
+            if ev is not None:
+                self._record_event(ev)
+                if ev.event_type is OrderEventType.ACCEPTED:
                     est = self.order_book.frozen_of(order.order_id)
                     self._account.freeze_cash(est)
                     self._frozen_by_order[order.order_id] = est
@@ -563,6 +606,23 @@ class BacktestSession:
 
     def available_cash(self) -> float:
         return self._account.available_cash
+
+    def release_order_freeze(self, order_id: str) -> None:
+        """释放该订单在账户侧的冻结（公开入口; 拒单/过期/撤销后调用, 5.3.4）。"""
+        self._release_order_freeze(order_id)
+
+    def frozen_of_order(self, order_id: str) -> float:
+        """该订单在账户侧的冻结额（防御性终检用: 成交前可用=available+frozen, 5.3.4）。"""
+        return self._frozen_by_order.get(order_id, 0.0)
+
+    def closeable_qty(self, code: str) -> float:
+        """T+1 可卖数量（防御性终检用: 卖出成交不得超可卖, 5.3.4）。"""
+        pos = self._account.positions.get(code)
+        return pos.closeable_qty if pos is not None else 0.0
+
+    def is_pending_sell(self, order_id: str) -> bool:
+        """该订单是否为已同步入账的挂单卖出（受理时已减仓, 成交终检跳过 T+1）。"""
+        return order_id in self._pending_sell_by_order
 
     def profile_of(self, code: str) -> Any:
         return self._profile(code)
@@ -621,6 +681,7 @@ class BacktestSession:
 
         PARTIAL_FILL 即释放该单全额预留（v1 日线: 部分成交后剩余量为 day 单,
         当日收盘必过期, 不会再成交——预留全额归还可用, 成交额再扣回, 5.3.4）。
+        挂单卖出（同步入账）过期/撤销 → 恢复持仓并退回预估回款（M3-N6）。
         """
         self._events.append(ev)
         self._emit("order_event", self._event_payload(ev))
@@ -631,9 +692,25 @@ class BacktestSession:
             OrderEventType.CANCEL,
         ):
             self._release_order_freeze(ev.order_id)
+        if ev.event_type in (OrderEventType.EXPIRE, OrderEventType.CANCEL, OrderEventType.REJECTED):
+            pending = self._pending_sell_by_order.pop(ev.order_id, None)
+            if pending is not None:
+                code, qty, est = pending
+                self._account.restore_pending_sell(code, qty, est)
 
     def account_apply_fill(self, fill: Any) -> None:
-        self._account_apply_fill(fill)
+        # 挂单卖出（受理时已入账）→ 成交确认补差, 不重复走普通卖出记账
+        self._fees["commission"] += fill.commission
+        self._fees["stamp_tax"] += fill.stamp_tax
+        self._fees["transfer_fee"] += fill.transfer_fee
+        self._cum_fee += fill.total_fee
+        if fill.side in _SELL_SIDES and fill.order_id in self._pending_sell_by_order:
+            code, qty, est = self._pending_sell_by_order.pop(fill.order_id)
+            self._account.apply_sell_credited(fill, qty, est)
+        else:
+            self._account.apply_fill(fill)
+        self._fills.append(fill)
+        self._emit("fill", self._fill_payload(fill))
 
     def finalize(self) -> dict[str, Any]:
         """结束回测: 返回结果字典（runner 导出/入库用, 9.1）。"""
@@ -668,18 +745,33 @@ class BacktestSession:
             if isinstance(req.direction, OrderDirection)
             else OrderDirection(req.direction)
         )
+        held = self._held(code)
         if style in (OrderStyle.QUANTITY, OrderStyle.MARKET):
-            qty = profile.lot_round(req.quantity or 0.0)
+            qty = req.quantity or 0.0
+            if qty <= 0:
+                return None
+            qty = (
+                profile.sellable_lot_round(qty, held)
+                if direction is OrderDirection.SELL
+                else profile.lot_round(qty)
+            )
             return (qty, direction) if qty > 0 else None
         if style is OrderStyle.VALUE:
             px = self._px(code)
             if px <= 0:
                 return None
-            qty = profile.lot_round((req.value or 0.0) / px)
+            qty = (req.value or 0.0) / px
+            if qty <= 0:
+                return None
+            qty = (
+                profile.sellable_lot_round(qty, held)
+                if direction is OrderDirection.SELL
+                else profile.lot_round(qty)
+            )
             return (qty, direction) if qty > 0 else None
         if style is OrderStyle.TARGET_QUANTITY:
-            diff = (req.target_quantity or 0.0) - self._held(code)
-            qty = self._signed(diff, profile)
+            diff = (req.target_quantity or 0.0) - held
+            qty = self._signed(diff, profile, held=held)
             if qty == 0:
                 return None  # 目标=当前持仓 → 忽略（g08）
             return qty, (OrderDirection.BUY if diff > 0 else OrderDirection.SELL)
@@ -687,19 +779,19 @@ class BacktestSession:
             px = self._px(code)
             if px <= 0:
                 return None
-            mv = self._held(code) * px
+            mv = held * px
             diff = (req.target_value or 0.0) - mv
-            qty = self._signed(diff / px, profile)
+            qty = self._signed(diff / px, profile, held=held)
             if qty == 0:
                 return None  # 目标=当前市值 → 忽略（g08）
             return qty, (OrderDirection.BUY if diff > 0 else OrderDirection.SELL)
         raise MtzQuantError(f"未支持下单风格 {style}", stage="session")
 
     @staticmethod
-    def _signed(x: float, profile: InstrumentProfile) -> float:
+    def _signed(x: float, profile: InstrumentProfile, *, held: float = 0.0) -> float:
         if x > 0:
             return profile.lot_round(x)
-        return -profile.lot_round(abs(x))
+        return -profile.sellable_lot_round(abs(x), held)
 
     def _held(self, code: str) -> float:
         pos = self._account.positions.get(code)
@@ -870,7 +962,9 @@ class BacktestSession:
                     last_price=pos.last_price,
                     today_qty=pos.today_qty,
                 )
+                # 排除 0 量占位（挂单卖出待确认）: 策略视图只应看到真实持仓, 5.3.4
                 for code, pos in self._account.positions.items()
+                if pos.total_qty > 0
             },
             available_cash=self._account.available_cash,
             receivable_cash=self._account.receivable_cash,
