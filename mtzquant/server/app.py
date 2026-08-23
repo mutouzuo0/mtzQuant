@@ -261,10 +261,18 @@ def create_app(
         for r in rows:
             r["started_at"] = _iso(r.get("started_at"))
             r["finished_at"] = _iso(r.get("finished_at"))
-        running = [h for h in manager.running_runs()] if manager else []
-        # 运行中句柄优先; known 原误取 rows 自身 → DB 历史行被全滤掉（M4 修复）
-        known = {h["run_id"] for h in running}
-        return running + [r for r in rows if r["run_id"] not in known]
+        live = [h for h in manager.running_runs()] if manager else []
+        # 会话管理器句柄（含已完成）与 DB 行合并: DB 行打底提供 platform/指标等落库字段,
+        # 句柄仅叠加实时状态——原实现整行替换, Web 提交的 run 完成后句柄永远在列,
+        # platform/总收益/年化恒缺（前端显示 "—"）。句柄缺 DB 行时（刚 submit）仍置顶。
+        by_id = {h["run_id"]: h for h in live}
+        merged: list[dict[str, Any]] = []
+        for r in rows:
+            h = by_id.pop(r["run_id"], None)
+            if h is not None:
+                r.update({k: v for k, v in h.items() if v not in (None, "")})
+            merged.append(r)
+        return list(by_id.values()) + merged
 
     @app.get("/api/runs/{run_id}")
     async def run_detail(run_id: str, dep: None = Depends(_require_any)) -> dict[str, Any]:

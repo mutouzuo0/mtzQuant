@@ -197,6 +197,48 @@ class TestRunsListKpi:
         row2 = next(r for r in rows2 if r["run_id"] == "r_kpi_2")
         assert row2["sharpe"] is None and row2["max_drawdown"] is None
 
+    def test_kpi_columns_with_manager_handle(self, tmp_path: Path) -> None:
+        """manager 句柄（Web 提交的 run, 含已完成）不得顶掉 DB 行的 platform/指标。
+
+        回归: 原实现句柄整行替换, Web 提交的 run 完成后 platform/总收益/年化恒为 "—"。
+        """
+        db_url = f"sqlite:///{tmp_path / 'kpi2.db'}"
+        repo = RunRepo(init_db(db_url))
+        snap, _ = repo.get_or_create_snapshot(file_name="s.py", code_text="x=1", sha256="h" * 8)
+        repo.create_run(
+            run_id="r_live_1",
+            task_name="t",
+            platform="ptrade",
+            snapshot_id=snap.id,
+            params_json="{}",
+        )
+        repo.set_metrics(
+            "r_live_1",
+            json.dumps({"metrics": {"sharpe": 1.2, "total_return": 0.5, "annual_return": 0.3}}),
+            "8.4-v1",
+        )
+        settings = Settings()
+        settings.database.url = db_url
+        mgr = _StubManager(
+            runs=[  # 句柄形状（会话管理器 info()）: 无 platform/指标字段
+                {
+                    "run_id": "r_live_1",
+                    "task_name": "t",
+                    "status": "completed_degraded",
+                    "started_at": "2026-08-23T13:16:43+08:00",
+                    "finished_at": "2026-08-23T13:20:56+08:00",
+                    "error": "",
+                }
+            ]
+        )
+        rows = TestClient(create_app(manager=mgr, settings=settings)).get("/api/runs").json()
+        matches = [r for r in rows if r["run_id"] == "r_live_1"]
+        assert len(matches) == 1  # 合并非重复
+        row = matches[0]
+        assert row["platform"] == "ptrade"  # DB 行打底, 不再被句柄顶掉
+        assert row["total_return"] == 0.5 and row["annual_return"] == 0.3
+        assert row["status"] == "completed_degraded"  # 句柄实时状态叠加
+
 
 # ============================================================
 # P0-1 静态资源版本指纹: index 带 ?v= 且 no-cache, 消灭新旧混跑
