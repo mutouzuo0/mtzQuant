@@ -127,5 +127,5 @@ PTrade 官方 15 种委托状态映射到引擎 `OrderStatus`（回测可达子�
 ## 执行方式
 
 ```bash
-mtzquant run --strategy strategies/ptrade/demo_all_weather.py --universe 510300.SS
+mtzquant run --strategy examples/strategies/ptrade/demo_all_weather.py --universe 510300.SS
 ```

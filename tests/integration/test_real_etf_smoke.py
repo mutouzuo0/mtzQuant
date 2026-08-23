@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:55:00
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/23 14:30:00
 # @description : T-I02 真实 ETF 数据端到端冒烟（@slow @network, 缺数据 skip）+ 演示任务配置校验
 
 """T-I02（设计 12.1-M1 真实数据验收, 依赖阶段 E 下载器落盘）。
@@ -34,11 +34,11 @@ from mtzquant.engine.session import TaskConfig
 from tests.fixtures.synth import write_etf_csv
 
 DEMO_TASK = Path("configs/demo_dual_ma.json")
-DEMO_STRATEGY = Path("strategies/native/dual_ma.py")
+DEMO_STRATEGY = Path("examples/strategies/native/dual_ma.py")
 
 
 def test_demo_task_config_and_strategy_valid() -> None:
-    """演示任务（configs/demo_dual_ma.json + strategies/native/dual_ma.py）配置合法、可加载。"""
+    """演示任务（demo_dual_ma 任务 JSON + examples 演示策略）配置合法、可加载。"""
     task = TaskConfig.model_validate(json.loads(DEMO_TASK.read_text(encoding="utf-8")))
     assert task.task_name == "demo_dual_ma"
     assert task.universe == ["510300.SH"]

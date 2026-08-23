@@ -1,7 +1,7 @@
 {
   "task_name": "demo_dual_ma",
   "strategy": {
-    "file": "strategies/native/dual_ma.py",
+    "file": "examples/strategies/native/dual_ma.py",
     "type": "native",
     "entry": "on_bar"
   },

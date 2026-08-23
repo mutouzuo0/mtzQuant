@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/17 10:30:00
-# @update_time        : 2026/08/17 10:30:00
+# @update_time        : 2026/08/23 14:30:00
 # @description : backtest 预检测试：标的检测/完整性/缺失下载/Web 地址 + WsHub 回放修复回归
 
 """`mtzquant backtest` 预检（计划: 检测标的→数据完整性→缺则下载→回测→Web 地址）。"""
@@ -35,22 +35,42 @@ def _strategy_source(rel: str) -> str:
     return (_REPO / rel).read_text(encoding="utf-8")
 
 
+# 合成"类全天候"ptrade 源码（14 标的; 含行内注释陷阱与 set_benchmark 基准）——
+# 替代原仓库内真实策略文件（strategies/ 已不入库, 演示策略在 examples/strategies/）
+_ALL_WEATHER_LIKE_SRC = """
+def initialize(context):
+    set_benchmark('000300.SS')  # 基准不入列
+    g.etfs = [
+        '510310.SS', '513100.SS', '513500.SS', '510210.SS',  # 股票类
+        '159903.SZ', '159919.SZ', '159901.SZ',
+        '510180.SS', '510050.SS',
+        '511010.SS', '511260.SS', '518880.SS',  # 债券/黄金
+        '160719.SZ', '165513.SZ',
+        # '159915.SZ',  # 整行注释不入列
+    ]
+"""
+
+
 # ============================================================
 # detect_codes / required_codes
 # ============================================================
 class TestDetectCodes:
     def test_native_dual_ma(self) -> None:
-        assert detect_codes(_strategy_source("strategies/native/dual_ma.py")) == ["510300.SH"]
+        assert detect_codes(_strategy_source("examples/strategies/native/dual_ma.py")) == [
+            "510300.SH"
+        ]
 
     def test_joinquant_and_ptrade_suffix(self) -> None:
-        assert detect_codes(_strategy_source("strategies/joinquant/dual_ma.py")) == ["510300.SH"]
-        assert detect_codes(_strategy_source("strategies/ptrade/demo_all_weather.py")) == [
+        assert detect_codes(_strategy_source("examples/strategies/joinquant/dual_ma.py")) == [
+            "510300.SH"
+        ]
+        assert detect_codes(_strategy_source("examples/strategies/ptrade/demo_all_weather.py")) == [
             "510300.SH"
         ]
 
     def test_all_weather_excludes_comments_and_benchmark(self) -> None:
-        """全天候 14 个标的; 行内注释 159915 与 set_benchmark 基准 000300 均不入列。"""
-        codes = detect_codes(_strategy_source("strategies/ptrade/全天候策略_ptrade.py"))
+        """类全天候合成源码 14 个标的; 行内注释 159915 与 set_benchmark 基准 000300 均不入列。"""
+        codes = detect_codes(_ALL_WEATHER_LIKE_SRC)
         assert len(codes) == 14
         assert "159915.SZ" not in codes  # 注释掉
         assert "000300.SH" not in codes  # 基准（set_benchmark）
