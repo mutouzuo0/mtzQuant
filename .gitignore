@@ -10,7 +10,11 @@ config/settings.json
 
 # ---- 本地数据与运行产物 ----
 # 注意: 必须锚定根目录（/data/），否则会误伤 mtzquant/data/ 源码与 tests/data/ 测试
-/data/
+# data/ 目录骨架（.gitkeep/README.md）入库, 内容文件一律不入库
+/data/**
+!/data/**/
+!/data/**/.gitkeep
+!/data/README.md
 results/
 .cache/
 mtzquant.db*
@@ -22,7 +26,11 @@ mtzquant.db*
 .zcode/
 
 # ---- 本地私有策略（用户策略 + Web 上传落点; 框架演示在 examples/strategies/）----
-/strategies/
+# 目录骨架（.gitkeep/README.md）入库, 策略文件不入库
+/strategies/**
+!/strategies/**/
+!/strategies/**/.gitkeep
+!/strategies/README.md
 /configs/all_weather_ptrade.json
 
 # ---- Python ----
