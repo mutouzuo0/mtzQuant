@@ -1,7 +1,7 @@
 /* coding:utf-8
  * @author      : 木头左
  * @create_time : 2026/08/17 03:20:00
- * @update_time : 2026/08/23 12:00:00
+ * @update_time : 2026/08/23 12:59:00
  * @description : mtzQuant Web 页面逻辑（原生 JS 无构建链, 9.1 数据一律来自 REST/DB 同源）——
  *                连接三态(P1-1)/状态徽章全量(P1-3)/指标缺失原因+补算(P0-2)/覆盖语义(P2-2)/
  *                表单增强(P2-4)/历史监控订阅+报告一键重跑+成交明细(横切)。
@@ -348,14 +348,16 @@ window.mtzHistory = {
     const cell = (v, cls = "") => (metricsMissing && v == null)
       ? `<td class="num"${missTitle} style="cursor:help">—</td>`
       : `<td class="num ${cls}">${v}</td>`;
+    // 收益涨跌色（红涨绿跌, 国内习惯）: >0 红 / <0 绿 / 0 或缺失无色
+    const retCls = v => v == null ? "" : (v > 0 ? "up" : v < 0 ? "down" : "");
     return `<tr>
       <td><input type="checkbox" class="run-check" data-id="${esc(r.run_id)}" data-plat="${esc(r.platform || "")}"
         ${this._selected.has(r.run_id) ? "checked" : ""} ${done ? "" : 'disabled title="仅已完成的 run 可对比"'}></td>
       <td>${esc(r.task_name)}</td>
       <td>${esc(this.PLATFORM_CN[r.platform] || r.platform || "—")}</td>
       <td>${statusBadge(r.status)}</td>
-      ${cell(r.total_return == null ? null : pct(r.total_return), (r.total_return || 0) >= 0 ? "up" : "down")}
-      ${cell(r.annual_return == null ? null : pct(r.annual_return))}
+      ${cell(r.total_return == null ? null : pct(r.total_return), retCls(r.total_return))}
+      ${cell(r.annual_return == null ? null : pct(r.annual_return), retCls(r.annual_return))}
       ${cell(r.max_drawdown == null ? null : pct(r.max_drawdown))}
       ${cell(r.sharpe == null ? null : num2(r.sharpe))}
       <td class="muted">${fmtTime(r.started_at)}</td>
@@ -408,7 +410,7 @@ window.mtzHistory = {
         const cells = j.runs.map(r => {
           const v = j.rows[k][r];
           const best = j.best[k] === r;
-          return `<td class="num" style="${best?"color:#2ecc71;font-weight:600":""}">${v==null?"—":Number(v).toFixed(4)}</td>`;
+          return `<td class="num" style="${best?"color:#16a34a;font-weight:600":""}">${v==null?"—":Number(v).toFixed(4)}</td>`;
         });
         return `<tr><td>${esc(k)}</td>${cells.join("")}</tr>`;
       }).join("");
@@ -507,9 +509,9 @@ async function drawCompareNav(root, others) {
   chart.setOption({
     grid:{left:50,right:20,top:20,bottom:40},
     tooltip:{trigger:"axis"},
-    legend:{data:navs.map(n=>n.rid.slice(0,14)), textStyle:{color:"#8b96b0"}},
-    xAxis:{type:"time",axisLabel:{color:"#8b96b0"}},
-    yAxis:{type:"value",scale:true,axisLabel:{color:"#8b96b0"}},
+    legend:{data:navs.map(n=>n.rid.slice(0,14)), textStyle:{color:"#6b7482"}},
+    xAxis:{type:"time",axisLabel:{color:"#6b7482"}},
+    yAxis:{type:"value",scale:true,axisLabel:{color:"#6b7482"}},
     series: navs.map(n => ({
       name: n.rid.slice(0,14), type:"line", showSymbol:false,
       data: n.rows.map(r => [new Date(r.trade_date+"T00:00:00+08:00").getTime(), r.strategy_nav]),

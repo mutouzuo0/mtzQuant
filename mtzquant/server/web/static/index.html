@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>mtzQuant Web 控制台</title>
 <style>
-  :root { --bg:#0f1420; --panel:#161d2e; --line:#232c44; --fg:#d7e0f2; --muted:#8b96b0;
-          --acc:#4c8dff; --green:#2ecc71; --red:#e74c3c; --yellow:#f1c40f; }
+  :root { --bg:#ffffff; --panel:#f5f7fa; --line:#e3e8f0; --fg:#1f2733; --muted:#6b7482;
+          --acc:#2563eb; --green:#16a34a; --red:#dc2626; --yellow:#d97706; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.5 "Segoe UI",system-ui,sans-serif; }
   header { display:flex; align-items:center; gap:14px; padding:12px 20px; background:var(--panel);
@@ -17,16 +17,16 @@
   nav a:hover { background:var(--line); color:var(--fg); }
   nav a.active { background:var(--acc); color:#fff; }
   .muted { color:var(--muted); }
-  #statusBadge { padding:2px 10px; border-radius:10px; font-size:12px; background:#26304a; }
-  .s-live { background:#0f2e1d; color:var(--green); }
-  .s-connecting { background:#3a3016; color:var(--yellow); }
-  .s-closed { background:#262a33; color:var(--muted); }
-  .s-completed_exact,.s-completed_degraded { background:#0f2e1d; color:var(--green); }
-  .s-running { background:#1e2a44; color:var(--acc); }
-  .s-error { background:#3a1616; color:var(--red); }
+  #statusBadge { padding:2px 10px; border-radius:10px; font-size:12px; background:#eef1f6; }
+  .s-live { background:#e7f6ec; color:var(--green); }
+  .s-connecting { background:#fdf3d7; color:var(--yellow); }
+  .s-closed { background:#eef0f3; color:var(--muted); }
+  .s-completed_exact,.s-completed_degraded { background:#e7f6ec; color:var(--green); }
+  .s-running { background:#e8f0fe; color:var(--acc); }
+  .s-error { background:#fdeaea; color:var(--red); }
   button:disabled { opacity:.45; cursor:not-allowed; }
   button:disabled:hover { border-color:var(--line); }
-  .idle-banner { background:#1e2a44; border:1px dashed var(--acc); border-radius:8px;
+  .idle-banner { background:#e8f0fe; border:1px dashed var(--acc); border-radius:8px;
                  padding:10px 14px; margin-bottom:12px; color:var(--fg); }
   .idle-banner a { color:var(--acc); }
   .progress-wrap { flex:1 1 100%; margin-top:4px; }
@@ -41,7 +41,7 @@
   .metric { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px; }
   .metric .v { font-size:18px; font-weight:600; }
   .metric .l { font-size:11px; color:var(--muted); }
-  .up { color:var(--green); } .down { color:var(--red); }
+  .up { color:var(--red); } .down { color:var(--green); }  /* 收益涨红跌绿（国内习惯, 红涨绿跌） */
   #navChart { height:300px; }
   table { width:100%; border-collapse:collapse; font-size:12px; }
   th,td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); }
@@ -56,7 +56,7 @@
            border-radius:6px; cursor:pointer; }
   button:hover { border-color:var(--acc); }
   button.danger { color:var(--red); } button.ok { color:var(--green); }
-  input,select,textarea { background:#0b101d; border:1px solid var(--line); color:var(--fg);
+  input,select,textarea { background:#ffffff; border:1px solid var(--line); color:var(--fg);
            border-radius:6px; padding:6px 8px; font:inherit; }
   label.btn-file { padding:5px 14px; border:1px solid var(--line); border-radius:6px; cursor:pointer; }
   label.btn-file:hover { border-color:var(--acc); }
@@ -67,15 +67,15 @@
   .tab.active { background:var(--acc); color:#fff; }
   #foot { padding:10px 20px; color:var(--muted); font-size:12px; }
   .pill { background:var(--line); padding:2px 8px; border-radius:8px; font-size:11px; }
-  .s-paused { background:#3a3016; color:var(--yellow); }
-  .s-stopped { background:#262a33; color:var(--muted); }
+  .s-paused { background:#fdf3d7; color:var(--yellow); }
+  .s-stopped { background:#eef0f3; color:var(--muted); }
   .fl { display:inline-block; min-width:86px; color:var(--muted); }
   .tabs { display:inline-flex; gap:2px; background:var(--panel); border:1px solid var(--line);
           border-radius:8px; padding:3px; flex-wrap:wrap; }
   th[data-s] { cursor:pointer; user-select:none; }
   th[data-s]:hover { color:var(--fg); }
   #toast { position:fixed; left:50%; bottom:34px; transform:translateX(-50%) translateY(20px); opacity:0;
-           background:#1e2a44; color:var(--fg); border:1px solid var(--acc); padding:8px 18px;
+           background:#ffffff; color:var(--fg); border:1px solid var(--acc); padding:8px 18px;
            border-radius:8px; transition:all .25s; pointer-events:none; z-index:99; }
   #toast.show { opacity:1; transform:translateX(-50%); }
   #toast.err { border-color:var(--red); }
