@@ -454,6 +454,12 @@ async function loadSessions(preferRunId){
     target=monSessions[monSessions.length-1].run_id;  // 默认最新
   }
   sel.value=target;
+  if(target!==prev){
+    // 程序化切换会话（提交后跳转 ?run= 等）与手动切换同权: 清旧数据 + 重订阅,
+    // 否则旧 run 曲线残留、重连后新 run 数据混入同一图（两条收益率曲线的根因）
+    onSessionChange(target);
+    return target;
+  }
   setMonMeta(monSessions.find(r=>r.run_id===target)
     || (target?{run_id:target, task_name:target, started_at:""}:null));
   updateControlState();
@@ -462,11 +468,11 @@ async function loadSessions(preferRunId){
 function onSessionChange(runId){
   // 切换会话: 清空旧 run 曲线/成交/日志 → 重连 WS 订阅新 run
   if(ws){ ws.close(); ws=null; }
-  wsSeq=0; navSeries=[]; benchSeries=[]; days=0; maxDD=0; dailyRets.length=0; FILLS.length=0;
+  wsSeq=0; navSeries=[]; benchSeries=[]; totalSeries=[]; days=0; maxDD=0; dailyRets.length=0; FILLS.length=0;
   $("fills").querySelector("tbody").innerHTML="";
   $("logs").innerHTML="";
   if(chartTimer){ clearTimeout(chartTimer); chartTimer=null; }
-  if(chart) chart.setOption({series:[{data:[]},{data:[]}]});
+  if(chart) chart.setOption({series:[{data:[]},{data:[]},{data:[]}]});
   setMonMeta(monSessions.find(r=>r.run_id===runId)
     || (runId?{run_id:runId, task_name:runId, started_at:""}:null));
   updateControlState();
@@ -490,20 +496,26 @@ function setProgress(p){
     ` · ${Math.round((p.percent||0)*100)}% · 已用 ${(p.elapsed_seconds||0).toFixed(1)}s${eta}`;
 }
 
-let chart=null, navSeries=[], benchSeries=[], days=0, maxDD=0, chartTimer=null;
+let chart=null, navSeries=[], benchSeries=[], totalSeries=[], days=0, maxDD=0, chartTimer=null;
 const dailyRets=[];
 function ensureChart(){
   if(chart) return chart;
   chart = echarts.init($("navChart"));
   chart.setOption({
-    grid:{left:50,right:20,top:20,bottom:40},
+    grid:{left:50,right:64,top:20,bottom:40},
     tooltip:{trigger:"axis"},
-    legend:{data:["策略","基准"],textStyle:{color:"#8b96b0"}},
+    legend:{data:["策略","基准","总资产"],textStyle:{color:"#8b96b0"}},
     xAxis:{type:"time",axisLabel:{color:"#8b96b0"}},
-    yAxis:{type:"value",scale:true,axisLabel:{color:"#8b96b0"}},
+    yAxis:[
+      {type:"value",scale:true,axisLabel:{color:"#8b96b0"}},                       // 左轴: 净值
+      {type:"value",scale:true,axisLabel:{color:"#8b96b0",                         // 右轴: 总资产(¥)
+        formatter:v=>v>=10000?(v/10000).toFixed(0)+"万":String(Math.round(v))},
+       splitLine:{show:false}}
+    ],
     series:[
       {name:"策略",type:"line",showSymbol:false,data:[],lineStyle:{color:"#4c8dff"},itemStyle:{color:"#4c8dff"}},
-      {name:"基准",type:"line",showSymbol:false,data:[],lineStyle:{color:"#8b96b0"},itemStyle:{color:"#8b96b0"}}
+      {name:"基准",type:"line",showSymbol:false,data:[],lineStyle:{color:"#8b96b0"},itemStyle:{color:"#8b96b0"}},
+      {name:"总资产",type:"line",showSymbol:false,yAxisIndex:1,data:[],lineStyle:{color:"#d97706"},itemStyle:{color:"#d97706"}}
     ]
   });
   return chart;
@@ -511,7 +523,7 @@ function ensureChart(){
 function flushChart(){
   // 全量 setOption 增量数据（appendData 官方仅支持 scatter, 对 line 静默无效——曲线空白的根因）
   if(!chart) return;
-  chart.setOption({series:[{data:navSeries},{data:benchSeries}]});
+  chart.setOption({series:[{data:navSeries},{data:benchSeries},{data:totalSeries}]});
 }
 function onDailyNav(d){
   const idle=$("monIdle"); if(idle) idle.style.display="none";  // 有真实数据流即收空闲引导
@@ -519,6 +531,7 @@ function onDailyNav(d){
   const t=new Date(d.trade_date+"T00:00:00+08:00").getTime();
   navSeries.push([t,d.nav]);
   if(d.benchmark_nav!=null) benchSeries.push([t,d.benchmark_nav]);
+  if(d.total_value!=null) totalSeries.push([t,d.total_value]);  // 总资产曲线（右轴, ¥）
   if(d.drawdown!=null && d.drawdown>maxDD) maxDD=d.drawdown;  // 逐日回撤取峰（后端 mark_to_market 已算当日值）
   ensureChart();
   if(!chartTimer) chartTimer=setTimeout(()=>{ chartTimer=null; flushChart(); }, 200);  // 节流批量刷图
@@ -590,6 +603,10 @@ function onLog(d){
 // ---- 事件分发（6.3 信封 {type,run_id,ts,event_seq,committed,data}）----
 function handle(env){
   const t=env.type, d=env.data||{};
+  // 会话隔离: 只渲染当前选中 run 的事件——WS 未带 run_id 订阅时收到全量广播,
+  // 不过滤会把其他 run（含上一个回测）的曲线/成交/日志混进本会话视图
+  const cur=($("monSession").value||"").trim();
+  if(!cur || !env.run_id || env.run_id!==cur) return;
   switch(t){
     case "progress": setProgress(d); break;
     case "daily_nav": onDailyNav(d); break;
