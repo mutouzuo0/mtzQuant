@@ -1,6 +1,6 @@
 # coding:utf-8
 # @author      : 木头左
-# @create_time        : 2026/08/17 02:20:00
+# @create_time        : 2026/08/23 13:20:00
 # @update_time        : 2026/08/17 02:20:00
 # @description : M4-W2 BacktestSessionManager：subprocess 强制隔离 + 控制 + 事件桥（设计 6.4/2.4）
 
@@ -142,6 +142,10 @@ class BacktestSessionManager:
         settings_path = self._workdir / "settings.json"
         settings_path.write_text(self._settings.model_dump_json(), encoding="utf-8")
         env["MTZQUANT_SETTINGS"] = str(settings_path)
+        # 强制子进程 stdout 走 UTF-8（与下方 Popen encoding="utf-8" 对齐）——否则中文 Windows
+        # 下 Python 按 GBK/cp936 写管道, 管理器按 UTF-8 读 → UnicodeDecodeError 流中断（日志全空）
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
         proc = subprocess.Popen(
             cmd,
             env=env,
