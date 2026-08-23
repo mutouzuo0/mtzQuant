@@ -57,7 +57,7 @@ lint-imports                                    # 依赖契约
 
 1. **测试通过才能 commit**；提交前跑完上方门禁全套。
 2. **密钥纪律**：任何 token/key 只进 `config/secrets.json`（已 gitignore）或 `MTZQUANT_*` 环境变量；代码/测试/文档/示例一律占位符。仓库只有 `*.example.json` 空模板。
-3. **不入库清单**：`config/secrets.json`、`config/settings.json`、`data/`（本地CSV）、`results/`、`.cache/`、`mtzquant.db*`、`.zcode/`（设计/计划文档）。
+3. **不入库清单**：`config/secrets.json`、`config/settings.json`、`data/`（本地CSV）、`results/`、`.cache/`、`mtzquant.db*`、`.zcode/`（设计/计划文档）、`strategies/`（本地私有策略目录，Web 上传落点；框架演示策略在 `examples/strategies/`）。
 4. **价格语义**（设计 3.14）：raw_price 是唯一记账/撮合基准；复权价只用于指标研究——不许把复权价喂给撮合。
 5. **确定性**（设计 8.8）：禁止未播种随机（seed=42）；dict 遍历先排序；时间戳整数毫秒。
 6. **接口变更**必须回写设计文档并升版本号，同时更新 `.zcode/plans/` 下计划进度。

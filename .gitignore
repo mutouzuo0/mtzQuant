@@ -21,6 +21,10 @@ mtzquant.db*
 # ---- 本地设计/计划文档（仅本地留存，不入库）----
 .zcode/
 
+# ---- 本地私有策略（用户策略 + Web 上传落点; 框架演示在 examples/strategies/）----
+/strategies/
+/configs/all_weather_ptrade.json
+
 # ---- Python ----
 __pycache__/
 *.py[cod]
