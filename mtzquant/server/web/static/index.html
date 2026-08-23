@@ -467,8 +467,9 @@ async function loadSessions(preferRunId){
 }
 function onSessionChange(runId){
   // 切换会话: 清空旧 run 曲线/成交/日志 → 重连 WS 订阅新 run
-  if(ws){ ws.close(); ws=null; }
-  wsSeq=0; navSeries=[]; benchSeries=[]; totalSeries=[]; days=0; maxDD=0; dailyRets.length=0; FILLS.length=0;
+  _dropWs();
+  if(reconnectTimer){ clearTimeout(reconnectTimer); reconnectTimer=null; }
+  wsSeq=0; seenSeqs.clear(); navSeries=[]; benchSeries=[]; totalSeries=[]; days=0; maxDD=0; dailyRets.length=0; FILLS.length=0;
   $("fills").querySelector("tbody").innerHTML="";
   $("logs").innerHTML="";
   if(chartTimer){ clearTimeout(chartTimer); chartTimer=null; }
@@ -652,8 +653,17 @@ async function onStatus(status, runId){
 }
 
 // ---- WS 订阅（M4-W3: run_id 过滤 + resume 补帧 + 重连）----
-let ws=null, wsSeq=0, reconnectTimer=null;
+let ws=null, wsSeq=0, reconnectTimer=null, wsGen=0;
+const seenSeqs=new Set();
+function _dropWs(){
+  // 关闭旧连接并先摘除回调——旧 socket 的 onclose 不再触发重连
+  // （旧实现 close() 后 onclose 异步触发 → scheduleReconnect → 双连接并存,
+  //  每个事件投递两次, 成交表每笔重复显示的根因）
+  if(ws){ ws.onclose=null; ws.onerror=null; ws.onmessage=null; try{ ws.close(); }catch(e){} ws=null; }
+}
 function connectWS(){
+  _dropWs();
+  const gen=++wsGen;  // 代际令牌: 仅当前代连接的 onclose/onerror 生效
   setStatus("connecting");  // P1-1: 连接发起即显示"连接中…"
   const runId = ($("monSession").value||"").trim() || undefined;
   const params = new URLSearchParams();
@@ -664,11 +674,19 @@ function connectWS(){
   catch(e){ setStatus("error"); return; }
   ws.onopen = () => { setStatus("live"); refreshRuntime(); };  // P1-1: 连接成功即"已连接"
   ws.onmessage = ev => {
-    try{ const env=JSON.parse(ev.data); wsSeq=Math.max(wsSeq, env.event_seq||0); handle(env); }
-    catch(e){ /* 忽略坏帧 */ }
+    try{
+      const env=JSON.parse(ev.data);
+      wsSeq=Math.max(wsSeq, env.event_seq||0);
+      // 幂等去重: 同一 event_seq 只处理一次（多连接/补帧重叠的兜底防御）
+      if(env.event_seq!=null){
+        if(seenSeqs.has(env.event_seq)) return;
+        seenSeqs.add(env.event_seq);
+      }
+      handle(env);
+    }catch(e){ /* 忽略坏帧 */ }
   };
-  ws.onclose = () => { setStatus("closed"); scheduleReconnect(); };
-  ws.onerror = () => { setStatus("error"); };
+  ws.onclose = () => { if(gen!==wsGen) return; setStatus("closed"); scheduleReconnect(); };
+  ws.onerror = () => { if(gen!==wsGen) return; setStatus("error"); };
 }
 function scheduleReconnect(){
   if(reconnectTimer) return;
