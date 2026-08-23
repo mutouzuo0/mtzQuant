@@ -335,6 +335,7 @@ window.mtzHistory = {
       a.onclick = ev => { ev.preventDefault(); deleteRun(a.dataset.del); };
     });
     this._updateCompareBtn();
+    this._syncCheckAll();
   },
 
   _rowHtml(r) {
@@ -376,20 +377,38 @@ window.mtzHistory = {
   _toggleCheck(cb) {
     if (cb.checked) {
       this._selected.add(cb.dataset.id);
-      if (this._selected.size > 6) {  // 前置拦截（10.3 上限）
-        this._selected.delete(cb.dataset.id);
-        cb.checked = false;
-        toast("对比最多勾选 6 个 run", false);
-      }
     } else {
       this._selected.delete(cb.dataset.id);
     }
     this._updateCompareBtn();
+    this._syncCheckAll();
+  },
+
+  // 表头全选: 作用于当前筛选结果中可勾选的行（已完成/失败）; 对比上限 6 移到点对比时校验
+  _toggleAll(master) {
+    const boxes = [...document.querySelectorAll("#runsTable tbody .run-check")]
+      .filter(b => !b.disabled);
+    boxes.forEach(b => {
+      b.checked = master.checked;
+      if (master.checked) this._selected.add(b.dataset.id);
+      else this._selected.delete(b.dataset.id);
+    });
+    this._updateCompareBtn();
+    this._syncCheckAll();
+  },
+
+  _syncCheckAll() {
+    const h = el("checkAllRuns");
+    if (!h) return;
+    const boxes = [...document.querySelectorAll("#runsTable tbody .run-check")]
+      .filter(b => !b.disabled);
+    h.checked = boxes.length > 0 && boxes.every(b => b.checked);
+    h.indeterminate = boxes.some(b => b.checked) && !h.checked;
   },
 
   _updateCompareBtn() {
     const b = el("btnCompare");
-    b.textContent = `对比选中 (${this._selected.size}/6)`;
+    b.textContent = `对比选中 (${this._selected.size})`;
     b.disabled = this._selected.size < 2;
     const bd = el("btnBatchDelete");
     if (bd) bd.disabled = this._selected.size < 1;
@@ -398,6 +417,10 @@ window.mtzHistory = {
   async compare() {
     const ids = [...this._selected];
     if (ids.length < 2) return;
+    if (ids.length > 6) {  // 10.3 上限: 勾选不设限, 点对比时校验
+      toast(`对比最多 6 个 run（当前 ${ids.length} 个）, 请先取消部分勾选`, false);
+      return;
+    }
     const plats = new Set(this._rows.filter(r => ids.includes(r.run_id)).map(r => r.platform));
     if (plats.size > 1 &&
       !confirm("勾选的 run 跨平台（指标口径一致但策略语义不同）, 仍要对比？")) return;
@@ -648,6 +671,8 @@ document.addEventListener("DOMContentLoaded", () => {
   if (b7) b7.onclick = () => mtzScan.load();
 
   // 历史页: 表头排序（点击切换方向; 文本列默认升序, 指标/时间默认降序）
+  const cbAll = document.getElementById("checkAllRuns");
+  if (cbAll) cbAll.onclick = () => mtzHistory._toggleAll(cbAll);
   document.querySelectorAll("#runsTable th[data-s]").forEach(th => {
     th.onclick = () => {
       const key = th.dataset.s, cur = window.mtzHistory._sort;
