@@ -18,7 +18,7 @@
 - **M1** 可信日线内核：事件驱动撮合 / PIT 时点 / 确定性重放 / CLI / 报告
 - **M2** 平台适配：聚宽/PTrade 原生策略零改动回测（黄金用例）+ 完整 DataFetcher
 - **M3** 向量化研究：因子引擎 / 股票池 / 组合构造 / 目标权重交接 / 摩擦归因 / 参数扫描 + 防过拟合套件
-- **M4** Web 实时可视：`mtzquant serve` 多页面 SPA + WS 事件流（断线补帧）+ 报告 + 数据体检 + 远程访问
+- **M4** Web 实时可视：`mtzquant serve` 多页面 SPA + WS 事件流（断线补帧）+ 报告 + 数据体检 + 远程访问 + `mtzquant backtest` 一键回测（检测标的 → 数据完整性 → 缺则下载 → 回测 → Web 可视）
 
 ## 安装
 
@@ -41,16 +41,24 @@ mtzquant config
 ## 常用命令
 
 ```bash
+mtzquant backtest -c configs/demo_dual_ma.json --open   # 一键回测：检测策略标的 → 校验数据完整性（缺则自动下载）→ 回测 → 打开 Web 可视
 mtzquant run -c configs/demo_dual_ma.json              # 执行回测
 mtzquant report <run_id>                                # 生成自包含 report.html（--open 浏览器）
+mtzquant replay <run_id>                                # 按 RunManifest 重放并逐笔 diff（orders/fills/nav）
+mtzquant validate -c configs/xxx.json                   # 校验任务配置（pydantic 全字段）
 mtzquant list / compare / lineage / diff / rerun        # 历史与谱系
 mtzquant optimize -c task.json --space '{"fast":[5,10,20],"slow":[40,60]}' --top 5   # 参数扫描
-mtzquant fetch --codes 510300.SH --start 2020-01-01 --end 2025-12-31   # 数据下载
+mtzquant fetch --codes 510300.SH --start 2020-01-01 --end 2025-12-31   # 数据下载（K线/主数据/基本面/成分）
 mtzquant fetch --fundamentals fina_indicator --codes 600000.SH ...      # 基本面（PIT）
+mtzquant fetch-etf --codes 510300.SH,510500.SH          # ETF 日线幂等下载（增量补齐）
+mtzquant sql "SELECT count(*) FROM read_csv_auto('data/kline/etf/day/510300.SH.csv')"  # DuckDB 只读即席查询
+mtzquant cache --all                                    # 清理 parquet 二级缓存
 mtzquant health                                          # 数据体检（DuckDB 全库扫描）
 mtzquant serve                                           # Web 控制台（监控/新建/历史/扫描/数据）
 mtzquant remote --provider tailscale                     # 远程访问配套（tailnet 手机可看）
 ```
+
+> 💻 **Windows 便捷脚本**：回测结果 Web 展示可用 `启动Web展示.bat`（自动拉起 `mtzquant serve` 并打开浏览器），`停止Web展示.bat` 负责停服。
 
 ## 开发
 
