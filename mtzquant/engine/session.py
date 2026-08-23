@@ -64,6 +64,9 @@ from mtzquant.engine.results import ResultStore
 
 _SH = ZoneInfo("Asia/Shanghai")
 
+# 未配置基准时的默认基准: 沪深300ETF（净值曲线基准列, 起点归一=1, 8.4）
+DEFAULT_BENCHMARK = "510300.SH"
+
 # 买入侧方向（冻结可用资金; 卖出不冻结, 5.3.4）
 _BUY_SIDES = frozenset({OrderDirection.BUY, OrderDirection.OPEN_LONG, OrderDirection.CLOSE_SHORT})
 _SELL_SIDES = frozenset(
@@ -346,16 +349,31 @@ class BacktestSession:
             )
 
     def _init_benchmark(self) -> None:
-        """基准净值: close_t / 首日 close（benchmark_nav, 8.4）。"""
-        bench = self.task.backtest.benchmark
-        if not bench:
+        """基准净值: close_t / 回测起点前最近收盘（benchmark_nav, 8.4; 起点归一=1）。
+
+        未配置基准时默认沪深300ETF（510300.SH）; 基准本地数据缺失时安静降级为无基准。
+        """
+        bench = self.task.backtest.benchmark or DEFAULT_BENCHMARK
+        try:
+            arr = self._provider.bar_array(bench)
+        except Exception:  # noqa: BLE001 — 基准缺数据不阻断回测, 仅无基准曲线
             return
-        arr = self._provider.bar_array(bench)
-        first = float(arr["close"][0]) if arr.size else 0.0
-        if first <= 0:
+        if not arr.size:
+            return
+        # 归一基数: 回测起点当日/之前最近一个收盘（保证基准曲线起点=1, 而非 CSV 全history首日）
+        start = self.task.backtest.start  # "YYYY-MM-DD"（ISO 字典序 = 日期序）
+        base = None
+        for ms, c in zip(arr["dt"], arr["close"], strict=True):
+            if _day_str(int(ms)) <= start:
+                base = float(c)
+            else:
+                break
+        if base is None or base <= 0:
+            base = float(arr["close"][0])  # 基准数据晚于回测起点 → 以首个可得收盘为基
+        if base <= 0:
             return
         self._benchmark_close = {
-            _day_str(int(ms)): float(c) / first
+            _day_str(int(ms)): float(c) / base
             for ms, c in zip(arr["dt"], arr["close"], strict=True)
         }
 

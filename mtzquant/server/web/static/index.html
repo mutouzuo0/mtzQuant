@@ -179,7 +179,7 @@
       <input id="newCapital" type="number" value="1000000" style="width:130px">
       <span id="capFmt" class="muted"></span>
       <span class="fl">基准</span>
-      <input id="newBenchmark" placeholder="000300.SH（可空）" style="width:130px">
+      <input id="newBenchmark" value="510300.SH" placeholder="留空默认沪深300ETF" style="width:150px" title="净值曲线基准；留空默认沪深300ETF（510300.SH），起点归一为 1">
       <span class="fl">频率</span>
       <select id="newFreq" disabled title="当前仅支持日线（分钟线规划中）"><option value="1d">日线</option></select>
     </div>
@@ -325,7 +325,7 @@
         <tr><td>平台</td><td>策略语法对应平台：PTrade / 聚宽 JoinQuant（原生 native 走 CLI）</td></tr>
         <tr><td>策略文件</td><td>从 <code>strategies/&lt;平台&gt;/</code> 选择，或本地上传 .py（自动语法预检）</td></tr>
         <tr><td>初始资金</td><td>回测期初可用现金（默认 100 万）</td></tr>
-        <tr><td>基准</td><td>对比基准指数代码，如 000300.SH；留空则无基准曲线</td></tr>
+        <tr><td>基准</td><td>对比基准代码，如 510300.SH / 000300.SH；留空默认沪深300ETF（510300.SH），起点归一为 1</td></tr>
         <tr><td>标的池</td><td>非必填：默认从策略源码自动提取标的（如 g.symbols）；全市场扫描型策略可在「JSON 模式」显式指定</td></tr>
         <tr><td>高级参数</td><td>佣金率 / 最低佣金 / 印花税率 / 过户费率，留空 = 品种默认值</td></tr>
         <tr><td>JSON 模式</td><td>进阶用法：直接编辑 / 读取完整任务 JSON（含初始持仓、除权除息等全部字段）</td></tr>
@@ -472,7 +472,7 @@ function onSessionChange(runId){
   $("fills").querySelector("tbody").innerHTML="";
   $("logs").innerHTML="";
   if(chartTimer){ clearTimeout(chartTimer); chartTimer=null; }
-  if(chart) chart.setOption({series:[{data:[]},{data:[]},{data:[]}]});
+  if(chart) chart.setOption({series:[{data:[]},{data:[]}]});
   setMonMeta(monSessions.find(r=>r.run_id===runId)
     || (runId?{run_id:runId, task_name:runId, started_at:""}:null));
   updateControlState();
@@ -504,18 +504,17 @@ function ensureChart(){
   chart.setOption({
     grid:{left:50,right:64,top:20,bottom:40},
     tooltip:{trigger:"axis"},
-    legend:{data:["策略","基准","总资产"],textStyle:{color:"#8b96b0"}},
+    legend:{data:["策略","基准"],textStyle:{color:"#8b96b0"}},
     xAxis:{type:"time",axisLabel:{color:"#8b96b0"}},
     yAxis:[
       {type:"value",scale:true,axisLabel:{color:"#8b96b0"}},                       // 左轴: 净值
-      {type:"value",scale:true,axisLabel:{color:"#8b96b0",                         // 右轴: 总资产(¥)
+      {type:"value",scale:true,axisLabel:{color:"#8b96b0",                         // 右轴: 总资产刻度(¥, 不画线)
         formatter:v=>v>=10000?(v/10000).toFixed(0)+"万":String(Math.round(v))},
        splitLine:{show:false}}
     ],
     series:[
       {name:"策略",type:"line",showSymbol:false,data:[],lineStyle:{color:"#4c8dff"},itemStyle:{color:"#4c8dff"}},
-      {name:"基准",type:"line",showSymbol:false,data:[],lineStyle:{color:"#8b96b0"},itemStyle:{color:"#8b96b0"}},
-      {name:"总资产",type:"line",showSymbol:false,yAxisIndex:1,data:[],lineStyle:{color:"#d97706"},itemStyle:{color:"#d97706"}}
+      {name:"基准",type:"line",showSymbol:false,data:[],lineStyle:{color:"#8b96b0"},itemStyle:{color:"#8b96b0"}}
     ]
   });
   return chart;
@@ -523,7 +522,15 @@ function ensureChart(){
 function flushChart(){
   // 全量 setOption 增量数据（appendData 官方仅支持 scatter, 对 line 静默无效——曲线空白的根因）
   if(!chart) return;
-  chart.setOption({series:[{data:navSeries},{data:benchSeries},{data:totalSeries}]});
+  const opt={series:[{data:navSeries},{data:benchSeries}]};
+  if(navSeries.length && totalSeries.length){
+    // 右轴=总资产刻度: 与左轴等比锁定（总资产=净值×期初资金）, 同一曲线高度左读净值/右读资产
+    const rng=r=>{const vs=r.map(p=>p[1]);const mn=Math.min(...vs),mx=Math.max(...vs);
+      const p=(mx-mn)*0.05||Math.abs(mx)*0.01||0.01;return [mn-p,mx+p];};
+    const [l0,l1]=rng(navSeries), [r0,r1]=rng(totalSeries);
+    opt.yAxis=[{min:l0,max:l1},{min:r0,max:r1}];
+  }
+  chart.setOption(opt);
 }
 function onDailyNav(d){
   const idle=$("monIdle"); if(idle) idle.style.display="none";  // 有真实数据流即收空闲引导
@@ -531,7 +538,7 @@ function onDailyNav(d){
   const t=new Date(d.trade_date+"T00:00:00+08:00").getTime();
   navSeries.push([t,d.nav]);
   if(d.benchmark_nav!=null) benchSeries.push([t,d.benchmark_nav]);
-  if(d.total_value!=null) totalSeries.push([t,d.total_value]);  // 总资产曲线（右轴, ¥）
+  if(d.total_value!=null) totalSeries.push([t,d.total_value]);  // 供右轴总资产刻度定标（不画线）
   if(d.drawdown!=null && d.drawdown>maxDD) maxDD=d.drawdown;  // 逐日回撤取峰（后端 mark_to_market 已算当日值）
   ensureChart();
   if(!chartTimer) chartTimer=setTimeout(()=>{ chartTimer=null; flushChart(); }, 200);  // 节流批量刷图

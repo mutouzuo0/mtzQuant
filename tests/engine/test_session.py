@@ -103,6 +103,14 @@ def on_bar(context, bar):
 """
 
 
+def test_session_benchmark_default_csi300etf(tmp_path: Path) -> None:
+    """未配置基准默认沪深300ETF（510300.SH）, 基准净值起点归一=1（8.4）。"""
+    env = make_backtest_env(tmp_path)  # 默认 code=510300.SH, 平坦价 10.0
+    result = run_task(env.task, settings=env.settings, out_root=env.out_root, persist=False)
+    first = result.bundle.navs[0]
+    assert first["benchmark_nav"] == pytest.approx(1.0)
+
+
 def test_session_odd_lot_residual_can_be_cleared(tmp_path: Path) -> None:
     """零股尾仓可一次性清空（回归: ETF轮动V16.1 近似版 2025-06-11 后停摆根因）。
 
