@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 09:14:00
-# @update_time        : 2026/08/23 13:05:00
+# @update_time        : 2026/08/25 19:56:01
 # @description : M4-W4 FastAPI 应用：REST + WS(event_seq) + 静态页 + 认证（7 章/6.2/6.3/13.5）
 
 """create_app（M4-W4）——在 M2-W0 最小版上扩展（不重写）。
@@ -11,7 +11,8 @@
 - `/static/*` 静态资源
 - `WS /api/ws?run_id=&last_event_seq=&bandwidth=` 多会话订阅 + resume 补帧 + 节流（W3）
 - REST: backtests 提交（表单字段级中文校验, P1-2）/ runs 历史详情（metrics_note, P0-2）/
-  pause·resume·stop / export / metrics 一键补算（P0-2）/ compare / fetch（覆盖语义, P2-2）/ health
+  pause·resume·stop / export / metrics 一键补算（P0-2）/ compare / diff（策略+参数差异, 10.3）/
+  fetch（覆盖语义, P2-2）/ health
   + strategies 列表/上传（新建页表单化）+ report.html 浏览（三面同权, 9.1）
 - 认证（D4/13.5）: `server.auth_enabled` 时 token 校验（secrets server.tokens {token: role}）;
   watcher 对控制端点 403, operator 全权（Y1 实装）。
@@ -525,6 +526,39 @@ def create_app(
         metrics = [(rid, repo.get_metrics(rid)) for rid in run_ids]
         table = build_compare_table(metrics)
         return {"runs": table["runs"], "rows": table["rows"], "best": table["best"]}
+
+    @app.get("/api/runs/{run_id}/diff")
+    async def run_diff(
+        run_id: str, other: str = "", dep: None = Depends(_require_any)
+    ) -> dict[str, Any]:
+        """两 run 策略源码快照 + 参数（sort_keys 归一）差异（10.3; 复用 engine.compare）。
+
+        与 CLI `mtzquant diff` 同一纯函数; 按 started_at 旧→新排序（- 旧 / + 新）,
+        空串 = 无差异。
+        """
+        if not _RUN_ID_RE.match(run_id) or ".." in run_id:
+            raise HTTPException(status_code=404, detail=f"run_id 非法: {run_id}")
+        if not other or not _RUN_ID_RE.match(other) or ".." in other:
+            raise HTTPException(status_code=400, detail="需要 other=<run_id> 指定对比对象")
+        from mtzquant.engine.compare import params_diff, strategy_diff
+        from mtzquant.store.models import init_db
+        from mtzquant.store.repo import RunRepo
+
+        repo = RunRepo(init_db(settings.database.url))
+        r1, r2 = repo.get(run_id), repo.get(other)
+        if r1 is None or r1.deleted_at is not None or r2 is None or r2.deleted_at is not None:
+            missing = [
+                rid
+                for rid, r in ((run_id, r1), (other, r2))
+                if r is None or r.deleted_at is not None
+            ]
+            raise HTTPException(status_code=404, detail=f"run 不存在: {', '.join(missing)}")
+        old_id, new_id = run_id, other
+        if (r1.started_at or datetime.min) > (r2.started_at or datetime.min):
+            old_id, new_id = other, run_id
+        sd = strategy_diff(repo.get_snapshot_code(old_id), repo.get_snapshot_code(new_id))
+        pdiff = params_diff(repo.get_params(old_id), repo.get_params(new_id))
+        return {"older": old_id, "newer": new_id, "strategy_diff": sd, "params_diff": pdiff}
 
     @app.post("/api/fetch")
     async def fetch(

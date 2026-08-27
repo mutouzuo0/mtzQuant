@@ -1,4 +1,11 @@
 <!DOCTYPE html>
+<!--
+ coding:utf-8
+ @author      : 木头左
+ @create_time : 2026/08/17 03:20:00
+ @update_time : 2026/08/25 21:30:00
+ @description : mtzQuant Web 控制台单页（监控/历史/新建/报告/数据/扫描, 原生 JS + ECharts 本地化, 9.1）
+-->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -188,6 +195,16 @@
       <span class="fl">结束日期</span><input id="newEnd" type="date">
       <span id="dateHint" class="muted"></span>
     </div>
+    <div class="row">
+      <span class="fl">成交价</span>
+      <label title="默认：策略决策当日的收盘价成交（当日 15:00 撮合；决策含当日收盘数据，same-bar 口径，结果或偏乐观）">
+        <input type="radio" name="newFillPrice" value="same_close" checked>当日收盘
+      </label>
+      <label title="次日 09:30 以次日开盘价成交（无前视，保真基线；原默认口径）">
+        <input type="radio" name="newFillPrice" value="next_open">次日开盘
+      </label>
+      <span class="muted">策略 15:00 决策提交 → 决定成交时点与价格</span>
+    </div>
     <details class="row" style="align-items:flex-start">
       <summary class="muted">高级参数（费率等, 留空 = 品种默认）</summary>
       <div class="row">
@@ -249,6 +266,8 @@
     <table id="compareTable"><thead></thead><tbody></tbody></table>
     <h2>净值对齐</h2>
     <div id="compareChart" style="height:280px"></div>
+    <h2>策略/参数差异</h2>
+    <div id="compareDiff"></div>
   </div>
 </div>
 

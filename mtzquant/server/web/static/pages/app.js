@@ -1,10 +1,11 @@
 /* coding:utf-8
  * @author      : 木头左
  * @create_time : 2026/08/17 03:20:00
- * @update_time : 2026/08/23 13:05:00
+ * @update_time : 2026/08/25 21:30:00
  * @description : mtzQuant Web 页面逻辑（原生 JS 无构建链, 9.1 数据一律来自 REST/DB 同源）——
  *                连接三态(P1-1)/状态徽章全量(P1-3)/指标缺失原因+补算(P0-2)/覆盖语义(P2-2)/
- *                表单增强(P2-4)/历史监控订阅+报告一键重跑+成交明细(横切)。
+ *                表单增强(P2-4)/历史监控订阅+报告一键重跑+成交明细(横切)/
+ *                对比选中反馈修复+策略/参数差异(2 run)。
  *                注意: 不声明 $/fmt/fmtPct 等名字（与 index.html 内联脚本顶层 const 冲突）。
  */
 
@@ -184,6 +185,9 @@ window.mtzNew = {
       if (v !== "" && v != null && Number.isFinite(Number(v))) fees[k] = Number(v);
     });
     if (Object.keys(fees).length) task.fees = fees;
+    // 成交价基准（引擎默认 same_close, 5.3.3）——总是显式写入, 任务自描述
+    const fp = document.querySelector('input[name="newFillPrice"]:checked');
+    if (fp) task.engine = { fill_price: fp.value };
     return task;
   },
 
@@ -210,6 +214,12 @@ window.mtzNew = {
         el("feeCommMin").value = task.fees.min_commission ?? "";
         el("feeStamp").value = task.fees.stamp_tax_rate ?? "";
         el("feeTransfer").value = task.fees.transfer_fee_rate ?? "";
+      }
+      // 成交价基准回填（无显式值时保持表单默认 same_close）
+      const fpv = (task.engine || {}).fill_price;
+      if (fpv) {
+        const fp = document.querySelector(`input[name="newFillPrice"][value="${fpv}"]`);
+        if (fp) fp.checked = true;
       }
       this.echoDateDefaults();
       this.fmtCapital();
@@ -408,15 +418,21 @@ window.mtzHistory = {
 
   _updateCompareBtn() {
     const b = el("btnCompare");
-    b.textContent = `对比选中 (${this._selected.size})`;
+    b.textContent = `对比选中 (${this._selected.size}/6)`;
     b.disabled = this._selected.size < 2;
+    b.title = this._selected.size < 2
+      ? "至少勾选 2 个已完成的 run 才能对比"
+      : "对比勾选的 2~6 个 run（指标对照+净值对齐；恰好 2 个时附策略/参数差异）";
     const bd = el("btnBatchDelete");
     if (bd) bd.disabled = this._selected.size < 1;
   },
 
   async compare() {
     const ids = [...this._selected];
-    if (ids.length < 2) return;
+    if (ids.length < 2) {  // 按钮禁用时点不到, 纯防御
+      toast("至少勾选 2 个 run 才能对比", false);
+      return;
+    }
     if (ids.length > 6) {  // 10.3 上限: 勾选不设限, 点对比时校验
       toast(`对比最多 6 个 run（当前 ${ids.length} 个）, 请先取消部分勾选`, false);
       return;
@@ -437,14 +453,18 @@ window.mtzHistory = {
         const cells = j.runs.map(r => {
           const v = j.rows[k][r];
           const best = j.best[k] === r;
-          return `<td class="num" style="${best?"color:#16a34a;font-weight:600":""}">${v==null?"—":Number(v).toFixed(4)}</td>`;
+          return `<td class="num" style="${best?"color:#dc2626;font-weight:600":""}">${v==null?"—":Number(v).toFixed(4)}</td>`;
         });
         return `<tr><td>${esc(k)}</td>${cells.join("")}</tr>`;
       }).join("");
       drawCompareNav(root, q);
+      await renderRunDiff(ids);
     } catch (e) {
       document.querySelector("#compareTable tbody").innerHTML = `<tr><td>✘ ${esc(e.message)}</td></tr>`;
     }
+    // 结果区在长表格下方, 无滚动定位/提示时视口内无任何变化——等效"点了没反应"
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
+    toast(`对比完成（${ids.length} 个 run）`);
   }
 };
 
@@ -559,6 +579,35 @@ async function drawCompareNav(root, others) {
       lineStyle:{width:1.4}
     }))
   });
+}
+
+/* 策略/参数差异渲染（恰好 2 个 run; 数据来自 GET /api/runs/{id}/diff, 与 CLI diff 同源 10.3） */
+async function renderRunDiff(ids) {
+  const box = el("compareDiff");
+  if (ids.length !== 2) {
+    box.innerHTML = `<span style="color:#6b7482">策略/参数差异仅支持恰好 2 个 run（当前 ${ids.length} 个）</span>`;
+    return;
+  }
+  try {
+    const d = await API.get(`/api/runs/${ids[0]}/diff?other=${encodeURIComponent(ids[1])}`);
+    const block = (title, text) => {
+      const head = `<h3 style="margin:10px 0 4px">${title}</h3>`;
+      if (!text) return head + `<div style="color:#6b7482">（无差异）</div>`;
+      const lines = text.split("\n").map(l => {
+        let c = "";
+        if (l.startsWith("+")) c = "color:#16a34a";
+        else if (l.startsWith("-")) c = "color:#dc2626";
+        else if (l.startsWith("@@")) c = "color:#6b7482";
+        return `<span style="${c}">${esc(l)}</span>`;
+      }).join("\n");
+      return head + `<pre style="max-height:320px;overflow:auto;background:#f6f8fa;padding:8px;border-radius:6px;font-size:12px;line-height:1.5">${lines}</pre>`;
+    };
+    box.innerHTML = `<div style="color:#6b7482;margin-bottom:4px">旧 ${esc(d.older)} → 新 ${esc(d.newer)}（- 旧 / + 新）</div>`
+      + block("策略源码差异", d.strategy_diff)
+      + block("参数差异（sort_keys 归一）", d.params_diff);
+  } catch (e) {
+    box.innerHTML = `<span style="color:#dc2626">✘ 差异获取失败: ${esc(e.message)}</span>`;
+  }
 }
 
 /* ==================== 报告详情页（M4: Web 端 report.html, 三面同权 9.1） ==================== */
