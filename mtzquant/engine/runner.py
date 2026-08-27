@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/23 12:00:00
+# @update_time        : 2026/08/25 21:25:00
 # @description : I1 runner.run_task：会话装配 → 引擎驱动 → 导出 → DB 入库（设计 5.1/8.8/9.1）
 
 """run_task（阶段 I 生产路径）——CLI `mtzquant run` 的核心编排。
@@ -206,6 +206,8 @@ def run_task(
         settings_fees=_settings_fees(settings),
         max_participation=settings.engine.max_participation,
         result_store=result_store,
+        # 成交价基准: task.engine.fill_price 优先, 其次 settings（默认 same_close, 5.3.3）
+        fill_price=(task.engine or {}).get("fill_price") or settings.engine.fill_price,
     )
     engine = UnifiedBacktestEngine(
         session,

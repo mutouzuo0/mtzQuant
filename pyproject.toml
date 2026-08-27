@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mtzquant"
-version = "0.1.0"
+version = "0.1.4"
 description = "mtzQuant: local-first, event-driven quantitative backtesting framework (JoinQuant/PTrade compatible, CSV-based)"
 readme = "README.md"
 requires-python = ">=3.11"

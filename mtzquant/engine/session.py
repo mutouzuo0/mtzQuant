@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/23 12:00:00
+# @update_time        : 2026/08/25 22:50:00
 # @description : F5/I1 BacktestSession：生产化会话 + 任务配置解析（3.6/5.1）; W0 emit + K4 视图
 
 """BacktestSession（设计 5.1 SessionPort 的生产实现，阶段 I 提炼自 golden DailyDriver）。
@@ -10,9 +10,10 @@
      NativeAdapter + Account + OpenOrderBook + BrokerSim + ResultStore。
 
 阶段⑥ 策略回调语义（与 golden 六要素口径一致，4.9.2）:
-  订单 15:00 收盘受理、eligible_fill_at=下一交易日 09:30（4.5 target_value 归一与
-  整手取整由本会话按 InstrumentProfile.lot_size 完成）;
-  撮合=次日开盘（FillModel next_open + 买卖侧代理滑点, 5.3.3）;
+  订单 15:00 收盘受理、eligible_fill_at 按 fill_price 成交价基准分发（默认
+  same_close=当日 15:00 收盘, 5.3.3 前视警示; next_open=次日 09:30, 4.5）;
+  target_value 归一与整手取整由本会话按 InstrumentProfile.lot_size 完成;
+  撮合=收盘/开盘按基准（FillModel 三值 + 买卖侧代理滑点, 5.3.3）;
   T+1 可卖校验、现金不足拒单、停牌/退市冻结估值（g03/g04/g06/g12 同构）。
 
 时间纪律（8.8 确定性）: 会话内一律 Asia/Shanghai tz-aware 毫秒时间戳;
@@ -167,6 +168,7 @@ class BacktestSession:
         settings_fees: FeeParams | None = None,
         max_participation: float = 0.25,
         result_store: ResultStore | None = None,
+        fill_price: str | None = None,
     ) -> None:
         self.task = task
         self.run_id = run_id or f"r_{task.task_name}"
@@ -207,9 +209,21 @@ class BacktestSession:
         # 撮合三件套（5.3.3 五模型; 先于适配器——initialize 期 set_* 族即可生效, 4.7）
         fee_params = settings_fees or FeeParams()
         self._fee_params = fee_params
+        # 成交价基准解析: 显式参数 > task.engine.fill_price（task 唯一事实来源, 3.6）
+        # > 引擎默认 same_close（5.3.3 前视警示）; runner 以 settings 兜底传参。
+        basis_src = fill_price or (task.engine or {}).get("fill_price") or "same_close"
+        try:
+            basis = PriceBasis(basis_src)
+        except ValueError:
+            raise MtzQuantError(
+                f"fill_price 非法: {basis_src!r}（可选 next_open/same_close/next_close）",
+                stage="session",
+                hint="task.engine.fill_price 须为 PriceBasis 三值之一",
+            ) from None
+        self._fill_price = basis  # 成交价基准（5.3.3: 决策当日收盘/次日开盘/次日收盘, 前视警示）
         self._broker = BrokerSim(
             models=MatchingModels(
-                fill=FillModel(basis=PriceBasis.NEXT_OPEN, half_spread=0.001),
+                fill=FillModel(basis=basis, half_spread=0.0),
                 slippage=SlippageModel(ratio=0.0),
                 fee=FeeModel(),
                 liquidity=LiquidityModel(max_participation=max_participation),
@@ -852,7 +866,7 @@ class BacktestSession:
             qty=qty,
             order_api=req.order_api,
             submitted_at=req.created_at,
-            eligible_fill_at=self._next_open(),
+            eligible_fill_at=self._eligible_fill_at(),
             time_in_force=TimeInForce.DAY,
         )
         self._orders.append(order)
@@ -870,14 +884,37 @@ class BacktestSession:
         self._record_event(ev)
         return order
 
+    def _eligible_fill_at(self) -> datetime:
+        """订单可撮合时点（按 fill_price 成交价基准分发, 5.3.3）。
+
+        - same_close（默认）: 当日 15:00 收盘——策略 15:00 决策后由引擎
+          阶段⑥.5 收盘撮合趟以当日收盘价成交（决策含当日收盘数据, same-bar
+          口径, 前视警示见设计 5.3.3）;
+        - next_open: 次日 09:30 开盘（4.5 原默认, g13 时刻级）;
+        - next_close: 次日 15:00 收盘。
+        """
+        if self._fill_price is PriceBasis.SAME_CLOSE:
+            return (
+                _at(self._current_dt, 15, 0)
+                if self._current_dt is not None
+                else datetime(2000, 1, 1, 15, 0, tzinfo=_SH)
+            )
+        if self._fill_price is PriceBasis.NEXT_CLOSE:
+            return self._next_at(15, 0)
+        return self._next_open()
+
     def _next_open(self) -> datetime:
         """下一交易日 09:30（4.5: 订单预约次日开盘撮合, g13 时刻级）。"""
+        return self._next_at(9, 30)
+
+    def _next_at(self, hour: int, minute: int) -> datetime:
+        """下一交易日 hour:minute（tz-aware; 无交易日/会话未开 → 纪元回退）。"""
         if self._current_dt is None:
-            return datetime(2000, 1, 1, 9, 30, tzinfo=_SH)
+            return datetime(2000, 1, 1, hour, minute, tzinfo=_SH)
         nxt = self._calendar.after(self._current_dt.date())
         if nxt is None:
-            return datetime(2000, 1, 1, 9, 30, tzinfo=_SH)
-        return _at(nxt, 9, 30)
+            return datetime(2000, 1, 1, hour, minute, tzinfo=_SH)
+        return _at(nxt, hour, minute)
 
     # ------------------------------------------------------------------
     # 成交入账（5.5: raw 价记账 + 现金四分类恒等式）

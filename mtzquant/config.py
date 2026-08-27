@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/15 21:33:45
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/25 21:15:00
 # @description : 配置加载与校验（设计 3.6 配置体系）
 
 """配置加载与校验（设计 3.6 配置体系）。
@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -108,7 +108,9 @@ class FeeSettings(BaseModel):
 
 
 class EngineSettings(BaseModel):
-    fill_price: str = "next_open"  # next_open|same_close|next_close（设计 5.3.3）
+    # 成交价基准（设计 5.3.3 前视警示）: same_close=决策当日收盘（引擎默认,
+    # 5.3.3 same-bar 口径）| next_open=次日开盘（保真基线）| next_close=次日收盘
+    fill_price: Literal["next_open", "same_close", "next_close"] = "same_close"
     slippage: SlippageSettings = Field(default_factory=SlippageSettings)
     default_fees: FeeSettings = Field(default_factory=FeeSettings)
     max_participation: float = 0.25  # 单笔 ≤ bar 成量比例（PTrade set_volume_ratio 默认一致）

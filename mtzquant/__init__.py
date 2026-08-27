@@ -1,6 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
-# @date        : 2026/08/15 21:33:45
+# @create_time        : 2026/08/15 21:33:45
+# @update_time        : 2026/08/25 23:10:00
 # @description : mtzQuant: 本地优先、事件驱动、多策略平台兼容的量化研究与回测平台底座
 
 """mtzQuant: 本地优先、事件驱动、多策略平台兼容的量化研究与回测平台底座。
@@ -15,6 +16,6 @@
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.1.4"
 
 METRICS_VERSION = "1.0.0"  # 指标口径版本（设计 8.4，口径修订时递增）

@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/23 12:10:00
+# @update_time        : 2026/08/25 22:05:00
 # @description : I3 RunManifest：确定性重放清单（strategy/data/config 哈希聚合, 设计 8.8）
 
 """RunManifest（设计 8.8）——确定性重放清单与治理。
@@ -200,6 +200,13 @@ def build_manifest(
     pl = engine.get("parent_lineage") or {}
     if pl:
         manifest["parent_lineage"] = pl
+    # 成交价基准（解析后实际值, 5.3.3）: task.engine.fill_price > settings > 默认 same_close。
+    # 显式落 manifest, 使默认 same_close 口径在 run 记录里自描述（前视警示, 设计 5.3.3）。
+    manifest["fill_price"] = (
+        engine.get("fill_price")
+        or (settings.engine.fill_price if settings else None)
+        or "same_close"
+    )
     # 指纹 = 剔除运行时刻等非确定性字段（8.8: 同输入 manifest_hash 全等, 供 replay 比对）
     fingerprint = {k: v for k, v in manifest.items() if k != "created_at"}
     manifest_hash = sha256_text(canonical_json(fingerprint))

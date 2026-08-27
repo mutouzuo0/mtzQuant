@@ -1,13 +1,15 @@
 # coding:utf-8
 # @author      : 木头左
-# @date        : 2026/08/15 22:30:00
-# @description : FillModel 基准价选择：next_open(默认)/same_close/next_close，买卖现货侧代理价差
+# @create_time        : 2026/08/15 22:30:00
+# @update_time        : 2026/08/25 22:45:00
+# @description : FillModel 基准价选择：same_close(默认)/next_open/next_close，默认零价差（5.3.3）
 
 """FillModel 基准价选择（设计 5.3.3）。
 
-v1 三种基准价：next_open（默认）/ same_close / next_close。
-买入取 ask 侧代理（基准价×(1+half_spread)）、卖出取 bid 侧代理（基准价×(1-half_spread)），
-价差以比例给出（默认 half_spread=0.001，即每股一档面对的中间价代理）。
+v1 三种基准价：same_close（默认，决策当日收盘，5.3.3 前视警示）/ next_open（次日开盘，保真基线）
+/ next_close（次日收盘）。默认 half_spread=0（成交价=基准价, 对齐 PTrade 精确收盘, 5.3.3）;
+half_spread>0 时买入取 ask 侧代理（基准价×(1+half_spread)）、卖出取 bid 侧代理
+（基准价×(1-half_spread)）。成交成本默认由 SlippageModel（策略 set_slippage）承担。
 """
 
 from __future__ import annotations
@@ -20,9 +22,9 @@ from mtzquant.engine.orders import OrderDirection
 
 
 class PriceBasis(StrEnum):
-    NEXT_OPEN = "next_open"  # 默认：下一 bar 开盘价（日线=次日开盘）
-    SAME_CLOSE = "same_close"  # 同 bar 收盘价
-    NEXT_CLOSE = "next_close"  # 下一 bar 收盘价
+    NEXT_OPEN = "next_open"  # 次日开盘（保真基线, 设计 5.3.3 无前视）
+    SAME_CLOSE = "same_close"  # 默认: 决策当日收盘（5.3.3 same-bar 口径, 前视警示）
+    NEXT_CLOSE = "next_close"  # 次日收盘
 
 
 _BUY_SIDES = frozenset({OrderDirection.BUY, OrderDirection.OPEN_LONG, OrderDirection.CLOSE_SHORT})
@@ -31,10 +33,10 @@ _SELL_SIDES = frozenset({OrderDirection.SELL, OrderDirection.CLOSE_LONG, OrderDi
 
 @dataclass(frozen=True)
 class FillModel:
-    """v1 默认基准价实现（无 I/O、纯计算）。"""
+    """基准价实现（无 I/O、纯计算）。默认 basis/half_spread 与引擎默认一致（5.3.3）。"""
 
-    basis: PriceBasis = PriceBasis.NEXT_OPEN
-    half_spread: float = 0.001  # 买卖侧代理价差（比例，0.1%）
+    basis: PriceBasis = PriceBasis.SAME_CLOSE
+    half_spread: float = 0.0  # 买卖侧代理价差（默认 0; >0 时买入上浮/卖出下浮）
 
     def fill_price(self, bar: MinimalBar, side: OrderDirection) -> float:
         ref = self._reference(bar)

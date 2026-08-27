@@ -44,7 +44,7 @@
     "buffer_max_rows": 50000
   },
   "engine": {
-    "fill_price": "next_open",
+    "fill_price": "same_close",
     "slippage": {
       "type": "ratio",
       "value": 0.001

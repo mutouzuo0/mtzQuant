@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 02:10:00
-# @update_time        : 2026/08/19 10:30:00
-# @description : F3 UnifiedBacktestEngine：日内十阶段主循环（设计 5.1/6.4）+ W0 事件
+# @update_time        : 2026/08/25 21:10:00
+# @description : F3 UnifiedBacktestEngine：日内十阶段主循环（5.1/6.4）+ 收盘撮合趟（5.3.3）+ W0
 
 """UnifiedBacktestEngine（设计 5.1）——统一回测主循环。
 
@@ -43,6 +43,11 @@ from mtzquant.engine.orders import (
 
 _OPEN: time = time(9, 30)
 _CLOSE: time = time(15, 0)
+
+
+def _at15(dt: datetime) -> datetime:
+    """当日 15:00 收盘时刻（撮合趟 bar 时戳, 5.3.3）。"""
+    return dt.replace(hour=15, minute=0, second=0, microsecond=0)
 
 
 @dataclass
@@ -169,6 +174,10 @@ class UnifiedBacktestEngine:
         orders = self.session.run_strategy(dt)
         if orders:
             self.session.orders_to_book(orders)
+        # ⑥.5 收盘撮合（5.3.3: same_close 当日 15:00 / next_close 次日 15:00 单;
+        # next_open 单未到可撮合时点 → 天然 no-op, 不改变 next_open 语义）
+        self.trace.hit("close_match")
+        self._match_close(dt)
         # ⑦ 盘中（日线无, 占位）
         self.trace.hit("intraday_none")
         # ⑧ on_daily_close 调度（日线降级折叠点）
@@ -191,6 +200,23 @@ class UnifiedBacktestEngine:
                 continue
             profile = self.session.profile_of(code)
             # 只撮合本标的订单（多标的池防串号成交, 5.3.2）
+            outcomes = self.broker.process_orders(self.order_book, bar, profile, code=code)
+            for oc in outcomes:
+                self._apply_outcome(oc)
+
+    def _match_close(self, dt: datetime) -> None:
+        """收盘撮合趟（5.3.3 same_close/next_close 口径, 设计 5.3.3 前视警示）。
+
+        与 _match_open 同管线（5.3.2 按 code 过滤）; bar 取回后时戳重标为当日
+        15:00, 使 eligible_fill_at<=15:00 的订单（same_close 当日单）入选、次日单
+        （next_open/next_close）不入选——SAME_CLOSE/NEXT_CLOSE 定价取 bar.close。
+        """
+        for code in sorted(self.session.universe()):
+            bar = self.session.bar_at(code, dt)
+            if bar is None:
+                continue
+            bar = replace(bar, dt=_at15(dt))
+            profile = self.session.profile_of(code)
             outcomes = self.broker.process_orders(self.order_book, bar, profile, code=code)
             for oc in outcomes:
                 self._apply_outcome(oc)

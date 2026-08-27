@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 02:05:00
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/08/25 22:50:00
 # @description : F2 BrokerSim：事件驱动撮合（一字板/容量截断/滑点/费用/部分成交, 设计 5.3.2/5.3.3）
 
 """BrokerSim（设计 5.3.2/5.3.3）——真实撮合内核, 替代阶段 C 的 MockBroker。
@@ -49,8 +49,8 @@ from mtzquant.engine.orders import (
 class MatchingModels:
     """撮合五模型组合快照（任务默认; M5+ 可替换增强实现）。"""
 
-    fill: FillModel = FillModel(basis=PriceBasis.NEXT_OPEN, half_spread=0.001)
-    slippage: SlippageModel = SlippageModel(ratio=0.0)  # 滑点默认已由 fill 买卖侧代理承担
+    fill: FillModel = FillModel(basis=PriceBasis.SAME_CLOSE, half_spread=0.0)
+    slippage: SlippageModel = SlippageModel(ratio=0.0)  # 滑点默认由策略 set_slippage 设定（5.3.3）
     fee: FeeModel = FeeModel()
     liquidity: LiquidityModel = LiquidityModel(max_participation=0.25)
     latency: LatencyModel = LatencyModel(bars_delay=0)
