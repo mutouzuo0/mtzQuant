@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 11:00:00
-# @update_time        : 2026/08/23 10:30:00
-# @description : L4-L7 PTradeAdapter：L0 API 注入 + 设置族 + run_daily 调度 + 注册（4.7）
+# @update_time        : 2026/08/25 22:40:00
+# @description : L4-L7 PTradeAdapter：L0 API 注入 + 设置族 + run_daily 调度 + 注册（4.7/5.3.3）
 
 """PTradeAdapter（设计 4.7 / 附录C）——PTrade 官方策略零改动回测。
 
@@ -54,6 +54,15 @@ from .objects import (
 # get_history 多字段列表的字段别名映射（4.7 近似族）: money=成交额→amount, price=现价→close
 _PTRADE_FIELD_MAP: dict[str, str] = {"money": "amount", "price": "close"}
 
+# PTrade 平台回测默认费率（5.3.3, 对齐真实 PTrade 回测日志: 恒定 万8、买卖双向、
+# 无最低佣金、ETF 免印花/过户）。策略 set_commission 在平台回测中不生效（见 set_commission）。
+_PTRADE_DEFAULT_FEE: dict[str, float] = {
+    "commission_rate": 0.0008,
+    "min_commission": 0.0,
+    "stamp_tax_rate": 0.0,
+    "transfer_fee_rate": 0.0,
+}
+
 
 class PTradeAdapter:
     """PTrade 平台适配器（L0 全量 + L1 子集, 4.7）。"""
@@ -92,7 +101,7 @@ class PTradeAdapter:
         exec(compile(code, str(strategy_path), "exec"), namespace)  # noqa: S102
         self._initialize = namespace.get("initialize")
         self._handle_data = namespace.get("handle_data")
-        self._before_trading = namespace.get("before_trading")
+        self._before_trading = namespace.get("before_trading_start")
         self._after_trading = namespace.get("after_trading_end")
         if self._initialize is None:
             raise MtzQuantError(
@@ -105,7 +114,7 @@ class PTradeAdapter:
         self._ctx.account = account_view
 
     def on_before_trading(self, ev: Any = None) -> None:
-        """盘前回调（before_trading; 当日 bar 不可见, data 为停牌占位, 5.2）。"""
+        """盘前回调（官方 before_trading_start; 当日 bar 不可见, data 为停牌占位, 5.2）。"""
         if self._before_trading is not None:
             self._refresh(_self_now(self._ctx))
             self._before_trading(self._ctx, self._bar_data_map(include_today=False))
@@ -178,6 +187,11 @@ class PTradeAdapter:
             base = float(task.backtest.initial_capital)
             self._ctx.capital_base = base
             self._ctx.sim_params.capital_base = base
+        # PTrade 平台默认费率（万8 双向无最低, 5.3.3）——先于策略 initialize 应用,
+        # 使策略 set_commission（平台回测不生效）之后费率仍为平台默认
+        set_fees = getattr(self._ctx, "set_fees_fn", None)
+        if set_fees is not None:
+            set_fees(**_PTRADE_DEFAULT_FEE)
         self._in_initialize = True
         try:
             if self._initialize is not None:
@@ -391,29 +405,22 @@ class PTradeAdapter:
         tax_ratio: float = 0.001,
         transfer_fee_ratio: float = 0.0,
     ) -> None:
-        """按品种费率（STOCK/ETF/LOF; M2 统一套用全品种, 品种档案差异归 M3）。
+        """按品种费率（STOCK/ETF/LOF; 4.7 兼容垫片: 首参数值 → 视为费率 + ETF 免印花）。
 
-        兼容垫片: 首参传数值费率（官方常见 `set_commission(0.0001)` 把费率当首参）时
-        视为佣金率并按 ETF 免印花税（该调用风格来自 ETF/LOF 策略）。
+        真实 PTrade **回测**不生效（平台按自身回测费率默认收费, 实测恒定 万8 双向
+        无最低佣金）; 故本适配器对 set_commission 一律忽略并记语义降级, 费率由
+        run_initialize 应用的平台默认 `_PTRADE_DEFAULT_FEE` 决定（对齐 PTrade 日志, 5.3.3）。
         """
         if isinstance(tradetype, (int, float)) and 0 < tradetype < 1:
             commission_ratio = float(tradetype)
             tradetype = "ETF"
-        fn = getattr(self._ctx, "set_fees_fn", None)
-        if fn is not None:
-            fn(
-                commission_rate=commission_ratio,
-                min_commission=min_commission,
-                stamp_tax_rate=tax_ratio if tradetype == "STOCK" else 0.0,
-                transfer_fee_rate=transfer_fee_ratio,
-            )
+        # 仅信息性写回 context 记录（不回写引擎费率; 引擎费率=平台默认）
         self._ctx.commission.cost = commission_ratio
         self._ctx.commission.tax = tax_ratio if tradetype == "STOCK" else 0.0
         self._ctx.commission.min_trade_cost = min_commission
-        if tradetype != "STOCK":
-            self._note_degradation(
-                f"set_commission(type={tradetype!r}) M2 统一费率套用全品种（品种档案归 M3）"
-            )
+        self._note_degradation(
+            "PTrade 回测: set_commission 不生效, 费率按平台默认 万8 双向无最低佣金"
+        )
 
     def set_slippage(self, value: float) -> None:
         """比例滑点（5.3.3）。"""
@@ -547,19 +554,15 @@ class PTradeAdapter:
     ) -> Any:
         """官方 get_history: 历史数据（count 根 × 单字段; 单标的 np.array, 多标的 DataFrame）。
 
-        多字段列表 `field=['open','high',...]` → 长表（index=dt, code 列=平台外部码, 各字段列）,
-        对齐原版策略 get_history 多字段直接返回带 code 列长表的用法（4.7 近似族）。
+        多标的（单字段或多字段列表）统一返回 python3.11 官方长表: index=dt,
+        code 列=平台外部码, 其余列为字段列（官方文档"4、API接口明细-获取信息函数"返回值节:
+        多股票 DataFrame 行索引 datetime、列索引为 code 与所取字段; 官方示例
+        get_history(5,'1d','close',security_list=...) 后接 query('code in [...])')['close']）。
+        单标的+单字段返回 np.array 为已记录的 D3 偏差（P_G09 黄金用例钉死）。
+        字段别名映射（4.7 近似族）: money=成交额→amount, price=现价→close。
         """
-        core = self._data_core()
-        if isinstance(security_list, str):
-            codes = [normalize_code(security_list)]
-        elif security_list:
-            codes = [normalize_code(c) for c in security_list]
-        else:
-            universe_fn = getattr(self._ctx, "universe_fn", None)
-            codes = list(universe_fn()) if universe_fn is not None else []
-        if isinstance(field, (list, tuple)):
-            fields = [_PTRADE_FIELD_MAP.get(f, f) for f in field]
+
+        def _long_table(fields: list[str]) -> pd.DataFrame:
             frames = []
             for c in codes:
                 frame = core.history(c, count, unit="1d", fields=fields, include_today=include)
@@ -571,13 +574,27 @@ class PTradeAdapter:
             if not frames:
                 return pd.DataFrame(columns=["code"] + fields)
             return pd.concat(frames)
-        frames = [
-            core.history(c, count, unit="1d", fields=[field], include_today=include) for c in codes
-        ]
+
+        core = self._data_core()
+        if isinstance(security_list, str):
+            codes = [normalize_code(security_list)]
+        elif security_list:
+            codes = [normalize_code(c) for c in security_list]
+        else:
+            universe_fn = getattr(self._ctx, "universe_fn", None)
+            codes = list(universe_fn()) if universe_fn is not None else []
+        if isinstance(field, (list, tuple)):
+            return _long_table([_PTRADE_FIELD_MAP.get(f, f) for f in field])
+        mapped = _PTRADE_FIELD_MAP.get(field, field)
         if len(codes) <= 1:
-            frame = frames[0] if frames else pd.DataFrame()
-            return frame[field].to_numpy() if field in getattr(frame, "columns", []) else frame
-        return pd.concat([f[field].rename(c) for f, c in zip(frames, codes, strict=True)], axis=1)
+            # 单标的: np.array（D3 已知偏差, P_G09 钉死）
+            frame = (
+                core.history(codes[0], count, unit="1d", fields=[mapped], include_today=include)
+                if codes
+                else pd.DataFrame()
+            )
+            return frame[mapped].to_numpy() if mapped in getattr(frame, "columns", []) else frame
+        return _long_table([mapped])
 
     def get_price(
         self,

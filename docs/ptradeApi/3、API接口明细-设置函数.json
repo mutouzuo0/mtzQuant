@@ -1,0 +1,243 @@
+
+{
+  "functions": [
+    {
+      "name": "set_universe",
+      "description": "设置股票池",
+      "usage": "仅在回测、交易模块可用",
+      "parameters": {
+        "security_list": {
+          "type": "list[str] / str",
+          "description": "股票列表，支持单支或多支股票"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "g.security = ['600570.SS','600571.SS']; set_universe(g.security)",
+        "handle_data": "his = get_history(5, '1d', 'close', security_list=None)"
+      }
+    },
+    {
+      "name": "set_benchmark",
+      "description": "设置基准",
+      "usage": "仅在回测、交易模块可用",
+      "parameters": {
+        "sids": {
+          "type": "str",
+          "description": "股票/指数/ETF代码"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "g.security = '000001.SZ'; set_universe(g.security); set_benchmark('000016.SS')",
+        "handle_data": "order('000001.SZ',100)"
+      }
+    },
+    {
+      "name": "set_commission",
+      "description": "设置佣金费率",
+      "usage": "仅在回测模块可用",
+      "parameters": {
+        "commission_ratio": {
+          "type": "float",
+          "description": "佣金费率，默认股票每笔交易的佣金费率是万分之三，ETF基金、LOF基金每笔交易的佣金费率是万分之八"
+        },
+        "min_commission": {
+          "type": "float",
+          "description": "最低交易佣金，默认每笔交易最低扣5元佣金"
+        },
+        "type": {
+          "type": "string",
+          "description": "交易类型，不传参默认为STOCK(目前只支持STOCK, ETF, LOF)"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "g.security = '600570.SS'; set_universe(g.security); set_commission(commission_ratio =0.0003, min_commission=3.0)",
+        "handle_data": "pass"
+      }
+    },
+    {
+      "name": "set_fixed_slippage",
+      "description": "设置固定滑点",
+      "usage": "仅在回测模块可用",
+      "parameters": {
+        "fixedslippage": {
+          "type": "float",
+          "description": "固定滑点，委托价格与最后的成交价格的价差设置"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "g.security = '600570.SS'; set_universe(g.security); set_fixed_slippage(fixedslippage=0.2)",
+        "handle_data": "pass"
+      }
+    },
+    {
+      "name": "set_slippage",
+      "description": "设置滑点比例",
+      "usage": "仅在回测模块可用",
+      "parameters": {
+        "slippage": {
+          "type": "float",
+          "description": "滑点比例，委托价格与最后的成交价格的价差设置，这个价差是当时价格的一个百分比"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "g.security = '600570.SS'; set_universe(g.security); set_slippage(slippage=0.002)",
+        "handle_data": "pass"
+      }
+    },
+    {
+      "name": "set_volume_ratio",
+      "description": "设置成交比例",
+      "usage": "仅在回测模块可用",
+      "parameters": {
+        "volume_ratio": {
+          "type": "float",
+          "description": "设置成交比例，默认0.25，即指本周期最大成交数量为本周期市场可成交总量的四分之一"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "g.security = '600570.SS'; set_universe(g.security); set_volume_ratio(volume_ratio = 0.5)",
+        "handle_data": "pass"
+      }
+    },
+    {
+      "name": "set_limit_mode",
+      "description": "设置成交数量限制模式",
+      "usage": "仅在回测模块可用",
+      "parameters": {
+        "limit_mode": {
+          "type": "str",
+          "description": "设置成交数量限制模式，即指回测撮合交易时对成交数量是否做限制进行控制"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "g.security = '600570.SS'; set_universe(g.security); set_limit_mode('UNLIMITED')",
+        "handle_data": "pass"
+      }
+    },
+    {
+      "name": "set_yesterday_position",
+      "description": "设置底仓",
+      "usage": "仅在回测模块可用",
+      "parameters": {
+        "poslist": {
+          "type": "list[dict[str:str],...]",
+          "description": "list类型数据，该list中是字典类型的元素，参数不能为空"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "g.security = '600570.SS'; set_universe(g.security); pos={'sid':'600570.SS', 'amount':'1000', 'enable_amount':'600', 'cost_basis':'55'}; set_yesterday_position([pos])",
+        "handle_data": "order(g.security, -100)"
+      }
+    },
+    {
+      "name": "set_parameters",
+      "description": "设置策略配置参数",
+      "usage": "仅在交易模块可用",
+      "parameters": {
+        "kwargs": {
+          "type": "a=b样式",
+          "description": "支持的参数包括holiday_not_do_before、tick_data_no_l2、receive_other_response、receive_cancel_response、not_restart_trade、server_restart_not_do_before"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "g.security = '600570.SS'; set_universe(g.security); set_parameters(holiday_not_do_before='1', tick_data_no_l2='1', receive_other_response='1', receive_cancel_response='1', not_restart_trade='1', server_restart_not_do_before='1')",
+        "before_trading_start": "log.info('do before_trading_start'); set_parameters(holiday_not_do_before='0', tick_data_no_l2='0', receive_other_response='0', receive_cancel_response='0')",
+        "handle_data": "pass"
+      }
+    },
+    {
+      "name": "set_email_info",
+      "description": "设置邮件信息",
+      "usage": "仅在交易模块可用",
+      "parameters": {
+        "email_address": {
+          "type": "str",
+          "description": "邮箱地址(发送方与接收方一致)"
+        },
+        "smtp_code": {
+          "type": "str",
+          "description": "邮箱SMTP授权码"
+        },
+        "email_subject": {
+          "type": "str",
+          "description": "邮件主题"
+        }
+      },
+      "returns": "返回设置是否成功True/False",
+      "example": {
+        "initialize": "g.security = '600570.SS'; set_universe(g.security); set_email_info('2222@qq.com', 'AABB', '【PTrade量化-策略交易异常终止提醒】')",
+        "before_trading_start": "raise BaseException('test send error email')",
+        "handle_data": "pass"
+      }
+    },
+    {
+      "name": "run_daily",
+      "description": "按日周期处理",
+      "usage": "仅在回测、交易模块可用",
+      "parameters": {
+        "context": {
+          "type": "Context",
+          "description": "Context对象，存放有当前的账户及持仓信息"
+        },
+        "func": {
+          "type": "Callable[[Context], None]",
+          "description": "自定义函数名称，此函数必须以context作为参数"
+        },
+        "time": {
+          "type": "str",
+          "description": "指定周期运行具体触发运行时间点，默认为9:31分，交易场景可设置范围：00:00~23:59"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "run_daily(context, get_finance); g.security = '600570.SS'; set_universe(g.security)",
+        "get_finance": "def get_finance(context): re = get_fundamentals(g.security,'balance_statement','total_assets'); log.info(re)",
+        "handle_data": "pass"
+      },
+      "notes": [
+        "该函数只能在初始化阶段initialize函数中调用。",
+        "该函数可以在initialize中多次调用，以实现多个定时任务。但需要注意的是交易中定时任务线程数限制为5且累计的任务不执行，即run_daily和run_interval累计调用超过5次时，将会因堵塞导致部分定时任务不触发。",
+        "股票策略回测中，当回测周期为分钟时，time的取值指定在09:31~11:30与13:00~15:00之间，当回测周期为日时，无论设定值是多少都只会在15:00执行；交易中不受此时间限制。"
+      ]
+    },
+    {
+      "name": "run_interval",
+      "description": "按设定周期处理",
+      "usage": "仅在交易模块可用",
+      "parameters": {
+        "context": {
+          "type": "Context",
+          "description": "Context对象，存放有当前的账户及持仓信息"
+        },
+        "func": {
+          "type": "Callable[[Context], None]",
+          "description": "自定义函数名称，此函数必须以context作为参数"
+        },
+        "seconds": {
+          "type": "int",
+          "description": "设定时间间隔(单位为秒)，取值为正整数"
+        }
+      },
+      "returns": "None",
+      "example": {
+        "initialize": "run_interval(context, interval_handle, seconds=10); g.security = '600570.SS'; set_universe(g.security)",
+        "interval_handle": "def interval_handle(context): snapshot = get_snapshot(g.security); log.info(snapshot)",
+        "handle_data": "pass"
+      },
+      "notes": [
+        "该函数只能在初始化阶段initialize函数中调用。",
+        "该函数可以在initialize中多次调用，以实现多个定时任务。但需要注意的是交易中定时任务线程数限制为5且累计的任务不执行，即run_daily和run_interval累计调用超过5次时，将会因堵塞导致部分定时任务不触发。",
+        "最小运行时间间隔seconds的设置规则：期货策略为1秒（用户设置值若小于1秒，系统仍当做1秒处理），股票等其他类型策略为3秒。"
+      ]
+    }
+  ]
+},
