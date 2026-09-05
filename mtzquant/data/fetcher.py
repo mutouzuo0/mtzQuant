@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 15:05:00
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/09/05 21:10:00
 # @description : O5 DataFetcher 六步管道：覆盖→增量下载(切片/checkpoint/多源)→归一→去重→原子落盘
 
 """DataFetcher 完整数据获取管道（设计 3.9 全图）。
@@ -68,11 +68,16 @@ def _fund_key(table: str) -> list[str]:
 
 
 def instrument_type_of(code: str) -> str:
-    """按代码推断品种类型（3.12 kline/{type} 布局）: 5/159/16 开头=ETF, 其余按股票。"""
+    """按代码推断品种类型（3.12 kline/{type} 布局）: 5/159/16 开头=ETF;
+    000xxx.SH / 399xxx.SZ 为指数（基准, 不可交易）, 其余按股票。"""
     norm = normalize_code(code)
     body = norm.split(".")[0]
     if body.startswith("5") or body.startswith("159") or body.startswith("16"):
         return "etf"
+    if body.startswith("000") and norm.endswith(".SH"):
+        return "index"
+    if body.startswith("399"):
+        return "index"
     return "stock"
 
 

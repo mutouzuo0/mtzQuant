@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 23:10:00
-# @update_time        : 2026/08/16 23:10:00
-# @description : M3-R2/R3 基本面与成分读取：FundamentalsStore（CSV → PIT 查询, 设计 3.13）
+# @update_time        : 2026/09/05 11:30:00
+# @description : M3-R2/R3 FundamentalsStore：基本面/成分 CSV → PIT 查询 + latest 快路径
 
 """基本面/成分本地存储（设计 3.13 PIT 四时间, M3-R2 落盘布局 + R3 查询）。
 
@@ -23,10 +23,12 @@ PIT 查询（R3, 3.13 双时间校验）:
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from mtzquant.core.errors import MtzQuantError
@@ -63,6 +65,32 @@ def _parse_yyyymmdd(value: Any) -> date | None:
             return None
 
 
+@dataclass
+class _ParsedFund:
+    """单 (table, code) 预解析缓存: 日期 int 数组 + 数值列 float 数组（按需解析）。
+
+    热路径背景: 全市场基本面池（数千 code × 每交易日 get_fundamentals）下,
+    逐次 `pd.to_datetime` + 布尔掩码 + 子帧拷贝是主要成本; 预解析后 latest
+    查询走 searchsorted/短回扫, 免建 DataFrame（见 fundamentals_latest）。
+    """
+
+    ev: np.ndarray  # 事件日 int64（YYYYMMDD; NaN 行已被过滤出数组, 见 _parsed_of）
+    pub: np.ndarray  # 公告日 int64（NaN 行缺披露日 → 与 fundamentals() 同口径 fail-loud）
+    n_missing_pub: int  # 缺披露日行数（>0 时 latest 也抛错, 与 frame 路径一致）
+    cols: dict[str, np.ndarray] = field(default_factory=dict)  # 源列 → float64 数组（懒解析）
+    _raw: Any = None  # 有效行原始 str DataFrame（数值列懒解析源; 不参与比较/ repr）
+
+
+def _date_int_array(series: pd.Series) -> tuple[np.ndarray, int]:
+    """日期列（YYYYMMDD/ISO 字符串）→ (int64 数组含 NaN 哨兵, 缺失行数)。"""
+    text = (
+        series.astype(str).str.strip().str.replace("-", "", regex=False).str.split(".", n=1).str[0]
+    )
+    num = pd.to_numeric(text, errors="coerce").to_numpy(dtype="float64")
+    missing = int(np.isnan(num).sum())
+    return num, missing
+
+
 class FundamentalsStore:
     """基本面 + 成分快照的 PIT 读取（不可变: 构造后只读, 确定性 8.8）。"""
 
@@ -70,6 +98,101 @@ class FundamentalsStore:
         self._root = Path(root_path)
         self._offset = timedelta(days=max(0, delay_offset_days))
         self._cache: dict[str, pd.DataFrame] = {}  # 会话级 {path: df}
+        self._parsed: dict[tuple[str, str], _ParsedFund] = {}  # (table, code) 预解析
+
+    def _parsed_of(self, table: str, code: str) -> _ParsedFund | None:
+        """单表单 code 预解析（缓存; 文件缺失 → None）。"""
+        key = (table, code)
+        hit = self._parsed.get(key)
+        if hit is not None:
+            return hit
+        raw = self._read_fundamentals(table, code)
+        if raw is None or raw.empty:
+            return None
+        spec = TABLE_SPECS[table]
+        ev, _ = _date_int_array(raw[spec["event_col"]])
+        pub, n_missing = _date_int_array(raw[spec["published_col"]])
+        keep = np.isfinite(ev) & np.isfinite(pub)
+        parsed = _ParsedFund(
+            ev=ev[keep].astype("int64"),
+            pub=pub[keep].astype("int64"),
+            n_missing_pub=n_missing,
+        )
+        parsed._raw = raw.loc[pd.Series(keep, index=raw.index)]  # 数值列懒解析源
+        self._parsed[key] = parsed
+        return parsed
+
+    def _col_values(self, parsed: _ParsedFund, source_col: str) -> np.ndarray:
+        """数值列懒解析并缓存（NaN 保持 NaN）。"""
+        arr = parsed.cols.get(source_col)
+        if arr is None:
+            raw_col = parsed._raw[source_col] if source_col in parsed._raw.columns else None
+            arr = (
+                pd.to_numeric(raw_col, errors="coerce").to_numpy(dtype="float64")
+                if raw_col is not None
+                else np.full(len(parsed.ev), np.nan)
+            )
+            parsed.cols[source_col] = arr
+        return arr
+
+    @staticmethod
+    def _dt_int(dt: datetime) -> int:
+        """datetime → int YYYYMMDD（墙钟日, 与 fundamentals() 同口径剥时区）。"""
+        naive = dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+        return naive.year * 10000 + naive.month * 100 + naive.day
+
+    def _kt_int(self, dt: datetime) -> int:
+        """knowledge_time → int YYYYMMDD（含供应商同步延迟 offset 天）。"""
+        naive = dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+        shifted = naive + self._offset
+        return shifted.year * 10000 + shifted.month * 100 + shifted.day
+
+    def fundamentals_latest(
+        self,
+        code: str,
+        table: str,
+        fields: list[str] | None,
+        *,
+        as_of: datetime,
+        knowledge_time: datetime | None = None,
+    ) -> dict[str, float | None] | None:
+        """as_of/knowledge_time 双约束下**最新可见行**的字段值（latest 快路径）。
+
+        返回 {源列: float|None}; 文件缺失或无可见行 → None。
+        与 `fundamentals()` 同口径: 缺披露日行 fail-loud; 语义对应聚宽
+        valuation/indicator 的"最新披露值"读取（jq DSL 求值热路径）。
+        """
+        if table not in TABLE_SPECS:
+            raise MtzQuantError(
+                f"未知财务表 {table!r}", stage="fundamentals", hint=f"可选: {sorted(TABLE_SPECS)}"
+            )
+        if knowledge_time is None:
+            knowledge_time = as_of
+        parsed = self._parsed_of(table, code)
+        if parsed is None:
+            return None
+        if parsed.n_missing_pub:
+            raise MtzQuantError(
+                f"财务数据 {code}/{table} 含 {parsed.n_missing_pub} 行缺披露日",
+                stage="fundamentals",
+                hint="ann_date 缺失行拒绝入库（R1 决策）; 检查数据源/落盘完整性",
+            )
+        asof_i = self._dt_int(as_of)
+        kt_i = self._kt_int(knowledge_time)
+        # ev 升序（落盘按事件日排序, normalizer/R1 已保证）: 先定位 ev<=asof 上界
+        hi = int(np.searchsorted(parsed.ev, asof_i, side="right"))
+        idx = -1
+        for i in range(hi - 1, -1, -1):  # 公告日约束短回扫（daily_basic pub==ev 首个即中）
+            if parsed.pub[i] <= kt_i:
+                idx = i
+                break
+        if idx < 0:
+            return None
+        out: dict[str, float | None] = {}
+        for f in fields or []:
+            v = self._col_values(parsed, f)[idx]
+            out[f] = None if not np.isfinite(v) else float(v)
+        return out
 
     # ------------------------------------------------------------------
     # 路径

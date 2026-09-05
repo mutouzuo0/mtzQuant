@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 14:58:00
-# @update_time        : 2026/08/16 21:59:08
-# @description : O4 tushare 源驱动（RemoteKlineSource）：pro.daily/fund_daily 日线 + 主数据
+# @update_time        : 2026/09/05 21:10:00
+# @description : O4 tushare 源驱动：pro.daily/fund_daily/index_daily 日线 + 主数据
 
 """tushare 源驱动（设计 3.2/3.9）——`RemoteKlineSource` 实现。
 
@@ -65,7 +65,7 @@ class TushareSource:
         self, code: str, start: date, end: date, *, instrument_type: str
     ) -> pd.DataFrame:
         pro = self._api()
-        api_name = "fund_daily" if instrument_type == "etf" else "daily"
+        api_name = {"etf": "fund_daily", "index": "index_daily"}.get(instrument_type, "daily")
         fn = getattr(pro, api_name, None)
         if fn is None:
             raise MtzQuantError(

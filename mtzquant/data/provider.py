@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 00:38:00
-# @update_time        : 2026/08/16 21:59:08
-# @description : D6 MarketDataProvider：PIT 时点 + BarArray 二分（3.7/3.8/3.13）
+# @update_time        : 2026/09/05 11:30:00
+# @description : D6 MarketDataProvider：PIT 时点 + BarArray 二分（3.7/3.8/3.13）+ 基本面快路径
 
 """统一数据供给层（设计 3.7/3.8/3.13）——三段式管道第 ③ 段。
 
@@ -248,6 +248,31 @@ class MarketDataProvider:
                 hint="build_pipeline/Provider 需注入 FundamentalsStore（M3-R3）",
             )
         return store.fundamentals(code, table, fields, as_of=as_of, knowledge_time=knowledge_time)
+
+    def fundamentals_latest(
+        self,
+        code: str,
+        table: str,
+        fields: list[str] | None,
+        *,
+        as_of: datetime,
+        knowledge_time: datetime | None = None,
+    ) -> dict[str, float | None] | None:
+        """基本面最新可见行字段值（快路径, 供 jq DSL 全市场池热路径; M3）。
+
+        语义等价 `fundamentals()` 结果取最后一行——store 侧预解析缓存 +
+        searchsorted 免建 DataFrame; 文件缺失/无可见行 → None。
+        """
+        store = self._fundamentals
+        if store is None:
+            raise MtzQuantError(
+                "fundamentals 数据未装配",
+                stage="provider",
+                hint="build_pipeline/Provider 需注入 FundamentalsStore（M3-R3）",
+            )
+        return store.fundamentals_latest(
+            code, table, fields, as_of=as_of, knowledge_time=knowledge_time
+        )
 
     def index_stocks(self, index: str, as_of: datetime) -> list[str]:
         """≤as_of 最近成分快照的标的列表（防幸存者偏差: 取历史快照, 3.13）。"""

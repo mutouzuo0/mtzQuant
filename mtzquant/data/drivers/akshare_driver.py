@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 15:00:00
-# @update_time        : 2026/08/16 21:59:08
-# @description : O4 akshare 源驱动（RemoteKlineSource）：ETF/股票日线 + 主数据尽力
+# @update_time        : 2026/09/05 21:10:00
+# @description : O4 akshare 源驱动（RemoteKlineSource）：ETF/股票/指数日线 + 主数据尽力
 
 """akshare 源驱动（设计 3.2/3.9）——`RemoteKlineSource` 实现。
 
@@ -61,6 +61,13 @@ class AkshareSource:
                 start_date=start.strftime("%Y%m%d"),
                 end_date=end.strftime("%Y%m%d"),
                 adjust="",
+            )
+        elif instrument_type == "index":
+            df = ak.index_zh_a_hist(
+                symbol=symbol,
+                period="daily",
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
             )
         else:
             df = ak.stock_zh_a_hist(
