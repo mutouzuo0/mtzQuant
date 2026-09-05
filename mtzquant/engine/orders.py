@@ -19,9 +19,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mtzquant.core.errors import MtzQuantError
+
+if TYPE_CHECKING:  # pragma: no cover - 仅注解（fill_price 反向依赖本模块, 防循环）
+    from mtzquant.engine.models.fill_price import PriceBasis
 
 
 class OrderDirection(StrEnum):
@@ -104,6 +107,7 @@ class OrderRequest:
     target_quantity: float | None = None  # target_quantity
     target_value: float | None = None  # target_value
     limit_price: float | None = None  # 限价（预留，v1 市价语义为空）
+    fill_basis: PriceBasis | None = None  # 按单成交价基准覆盖（run_daily 槽位标注）
 
 
 @dataclass
@@ -121,6 +125,7 @@ class Order:
     status: OrderStatus = OrderStatus.PENDING
     limit_price: float | None = None
     eligible_fill_at: datetime | None = None  # 最早可撮合事件时刻（next_open → 次日开盘 bar）
+    fill_basis: PriceBasis | None = None  # 按单成交价基准（同 OrderRequest; None=会话全局）
     time_in_force: TimeInForce = TimeInForce.DAY
     filled_qty: float = 0.0
     remaining_qty: float = field(init=False)  # 未成交数量（部分成交核心字段）

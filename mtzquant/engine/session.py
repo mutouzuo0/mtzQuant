@@ -216,9 +216,9 @@ class BacktestSession:
             basis = PriceBasis(basis_src)
         except ValueError:
             raise MtzQuantError(
-                f"fill_price 非法: {basis_src!r}（可选 next_open/same_close/next_close）",
+                f"fill_price 非法: {basis_src!r}（可选 next_open/same_close/next_close/same_open）",
                 stage="session",
-                hint="task.engine.fill_price 须为 PriceBasis 三值之一",
+                hint="task.engine.fill_price 须为 PriceBasis 四值之一",
             ) from None
         self._fill_price = basis  # 成交价基准（5.3.3: 决策当日收盘/次日开盘/次日收盘, 前视警示）
         self._broker = BrokerSim(
@@ -876,7 +876,8 @@ class BacktestSession:
             qty=qty,
             order_api=req.order_api,
             submitted_at=req.created_at,
-            eligible_fill_at=self._eligible_fill_at(),
+            eligible_fill_at=self._eligible_fill_at(req.fill_basis),
+            fill_basis=req.fill_basis,
             time_in_force=TimeInForce.DAY,
         )
         self._orders.append(order)
@@ -894,22 +895,31 @@ class BacktestSession:
         self._record_event(ev)
         return order
 
-    def _eligible_fill_at(self) -> datetime:
-        """订单可撮合时点（按 fill_price 成交价基准分发, 5.3.3）。
+    def _eligible_fill_at(self, basis: PriceBasis | None = None) -> datetime:
+        """订单可撮合时点（按成交价基准分发, 5.3.3; basis=None 取会话全局）。
 
         - same_close（默认）: 当日 15:00 收盘——策略 15:00 决策后由引擎
           阶段⑥.5 收盘撮合趟以当日收盘价成交（决策含当日收盘数据, same-bar
           口径, 前视警示见设计 5.3.3）;
+        - same_open: 当日 09:30 开盘——聚宽 run_daily 早盘槽位（≤10:00）折叠
+          当日开盘价成交（忠实"低开早盘买入"类策略 9:31 开盘成交语义）;
         - next_open: 次日 09:30 开盘（4.5 原默认, g13 时刻级）;
         - next_close: 次日 15:00 收盘。
         """
-        if self._fill_price is PriceBasis.SAME_CLOSE:
+        eff = basis or self._fill_price
+        if eff is PriceBasis.SAME_CLOSE:
             return (
                 _at(self._current_dt, 15, 0)
                 if self._current_dt is not None
                 else datetime(2000, 1, 1, 15, 0, tzinfo=_SH)
             )
-        if self._fill_price is PriceBasis.NEXT_CLOSE:
+        if eff is PriceBasis.SAME_OPEN:
+            return (
+                _at(self._current_dt, 9, 30)
+                if self._current_dt is not None
+                else datetime(2000, 1, 1, 9, 30, tzinfo=_SH)
+            )
+        if eff is PriceBasis.NEXT_CLOSE:
             return self._next_at(15, 0)
         return self._next_open()
 

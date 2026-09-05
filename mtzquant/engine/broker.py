@@ -132,7 +132,8 @@ class BrokerSim:
         fill_qty = min(order.remaining_qty, max_qty)
         capped = fill_qty < order.remaining_qty
 
-        base = self.models.fill.fill_price(bar, order.side)
+        # 基准价: 按单覆盖（适配器 run_daily 槽位标注, 如 same_open 早盘）优先, 否则会话全局
+        base = self.models.fill.fill_price(bar, order.side, order.fill_basis)
         price = self.models.slippage.apply(base, order.side)
         fee = self.models.fee.compute(fill_qty, price, profile, order.side)
 
