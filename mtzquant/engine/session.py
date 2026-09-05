@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 06:48:31
-# @update_time        : 2026/08/25 22:50:00
-# @description : F5/I1 BacktestSession：生产化会话 + 任务配置解析（3.6/5.1）; W0 emit + K4 视图
+# @update_time        : 2026/09/05 11:30:00
+# @description : F5/I1 BacktestSession：生产化会话 + 任务配置（3.6/5.1）; W0 emit + K4 视图
 
 """BacktestSession（设计 5.1 SessionPort 的生产实现，阶段 I 提炼自 golden DailyDriver）。
 
@@ -838,8 +838,18 @@ class BacktestSession:
         return pos.total_qty if pos else 0.0
 
     def _px(self, code: str) -> float:
-        """最近结算收盘价基准（4.5 归一基准; 停牌沿用最近有效收盘）。"""
-        return self._last_close_px.get(code, 0.0)
+        """最近结算收盘价基准（4.5 归一基准; 停牌沿用最近有效收盘）。
+
+        池外标的（平台策略动态选股, 当日才入池）当日收盘价惰性补取——
+        否则 order_target_value 归一无价被静默丢弃, 与平台"任意标的可下单"语义不符。
+        """
+        px = self._last_close_px.get(code, 0.0)
+        if px <= 0 and self._current_dt is not None:
+            bar = self._provider.bar_at(code, _at(self._current_dt, 15, 0))
+            if bar is not None and not bar.suspended:
+                px = bar.close
+                self._last_close_px[code] = px
+        return px
 
     def _translate(self, req: OrderRequest) -> Order | None:
         """OrderRequest → Order（前置校验: 空量/退市/T+1 可卖, 4.5）。"""

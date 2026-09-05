@@ -1,19 +1,21 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 02:00:00
-# @update_time        : 2026/08/16 21:59:08
+# @update_time        : 2026/09/05 11:30:00
 # @description : F1 OpenOrderBook：受理/冻结/eligible 筛选/更新/当日过期（设计 5.3.1/5.3.4）
 
 """OpenOrderBook（设计 5.3.1/5.3.4）——引擎待撮合队列。
 
 职责:
-  accept     受理: 买入冻结可用资金（预估额含佣）; 现金不足 → REJECTED（不冻结不进场）
+  accept     受理: 买入按**本金**冻结可用资金; 本金超现金 → REJECTED（不冻结不进场）;
+             费用余量溢出不拒单——由成交侧 `_cap_buy_to_cash` 缩量部分成交兜底
+             （对齐平台"按可用资金调整下单量"语义, 等分现金策略末单不再被佣金余量拒掉）
   eligible   按 bar_dt 筛选 eligible_fill_at <= dt 的可撮合订单
   release    成交/过期/撤销后释放冻结
   day 过期   time_in_force=day 当日未成交 → EXPIRE（收市清算阶段, 5.3.4）
   cancel     客户撤销（预留）
 
-冻结账目: _frozen[order_id] = 预估额; 与 Account.frozen_cash 同步（5.3.4 冻结/释放）。
+冻结账目: _frozen[order_id] = 本金预估额; 与 Account.frozen_cash 同步（5.3.4 冻结/释放）。
 """
 
 from __future__ import annotations
@@ -52,11 +54,13 @@ class OpenOrderBook:
         min_commission: float = 5.0,
         slippage_ratio: float = 0.0,
     ) -> OrderEvent | None:
-        """受理订单: 现金预检（买入）→ 冻结 → 进场; 不足 → REJECTED（不进场）。
+        """受理订单: 现金预检（买入, **本金口径**）→ 冻结 → 进场; 本金不足 → REJECTED。
 
         返回受理事件或拒单事件; 拒单时订单终态 REJECTED、无冻结。
         `slippage_ratio`: 冻结预估价按 (1+滑点) 上浮——next_open 撮合含滑点, 防
         多单等分现金时冻结低估导致成交超现金（5.3.4）。
+        佣金/最低费溢出不在受理端拦截（等分现金末单冻结≈可用时按余量拒单会
+        系统性丢最后一仓）——成交侧 `_cap_buy_to_cash` 按 可用+冻结 缩量兜底。
         """
         if order.order_id in self._orders:
             raise MtzQuantError(
@@ -92,9 +96,9 @@ class OpenOrderBook:
         min_commission: float,
         slippage_ratio: float = 0.0,
     ) -> float:
-        amount = order.qty * ref_price * (1 + slippage_ratio)
-        fee = max(min_commission, commission_rate * amount)
-        return amount + fee
+        """冻结预估 = 本金（含滑点上浮）; 费用余量不冻结（成交侧缩量兜底）。"""
+        del commission_rate, min_commission  # 费用不进冻结（见 accept docstring）
+        return order.qty * ref_price * (1 + slippage_ratio)
 
     # ------------------------------------------------------------------
     def eligible(self, dt: datetime, code: str | None = None) -> Iterator[Order]:
