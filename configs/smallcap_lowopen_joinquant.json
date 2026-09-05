@@ -1,0 +1,17 @@
+{
+  "task_name": "小市值低开早盘买入_聚宽原版",
+  "strategy": {
+    "file": "strategies/joinquant/小市值低开早盘买入.py",
+    "type": "joinquant"
+  },
+  "backtest": {
+    "start": "2025-01-01",
+    "end": "2026-08-01",
+    "initial_capital": 100000,
+    "frequency": "1d",
+    "benchmark": "510300.SH"
+  },
+  "engine": {
+    "fill_price": "same_close"
+  }
+}

@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 09:50:00
-# @update_time        : 2026/08/16 21:59:08
-# @description : K5 下单族归一（4.5/5.3.4）：五函数 → OrderRequest, BrokerGateway 落点
+# @update_time        : 2026/08/27 15:30:00
+# @description : K5 下单族归一（4.5/5.3.4）：五函数 → OrderRequest, BrokerGateway 落点 + target 去重
 
 """下单族归一（设计 4.5）——`order/order_target/order_value/order_target_value/order_market`。
 
@@ -157,6 +157,35 @@ def make_order_api(
     ns.order_shares = order_shares
     ns.platform = platform
     return ns
+
+
+# target 风格集合（同 bar 同标的多次调用 → 后者覆盖前者意图）
+_TARGET_STYLES = frozenset({OrderStyle.TARGET_QUANTITY, OrderStyle.TARGET_VALUE})
+
+
+def dedup_target_orders(requests: list[OrderRequest]) -> list[OrderRequest]:
+    """同 bar 同标的 target 订单去重：只保留最后一次 target 调用。
+
+    平台语义: `order_target(stock, N)` / `order_target_value(stock, V)` 表达
+    「把该标的调到目标量/值」的意图。同一 bar 内多次调用时，前一次意图已被
+    后一次覆盖（真实平台中前一次下单后持仓/冻结变化，后续调用算出不同差额
+    甚至零差额）。回测适配器在 `take_orders()` 阶段模拟此语义：同 code 多
+    笔 target 请求只保留最后一条，非 target 请求（order/order_value 增量单）
+    全部保留。
+
+    算法: 反向遍历，每个 code 首次遇到的 target 订单保留（即原序最后一条），
+    更早的 target 订单丢弃。非 target 订单无条件保留。O(n) 时间。
+    """
+    seen_target_codes: set[str] = set()
+    result: list[OrderRequest] = []
+    for req in reversed(requests):
+        if req.style in _TARGET_STYLES:
+            if req.code in seen_target_codes:
+                continue  # 同 code 更早的 target 调用 → 丢弃
+            seen_target_codes.add(req.code)
+        result.append(req)
+    result.reverse()
+    return result
 
 
 class _Namespace:

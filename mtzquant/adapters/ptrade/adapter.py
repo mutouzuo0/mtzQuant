@@ -1,7 +1,7 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 11:00:00
-# @update_time        : 2026/08/25 22:40:00
+# @update_time        : 2026/08/27 15:30:00
 # @description : L4-L7 PTradeAdapter：L0 API 注入 + 设置族 + run_daily 调度 + 注册（4.7/5.3.3）
 
 """PTradeAdapter（设计 4.7 / 附录C）——PTrade 官方策略零改动回测。
@@ -36,7 +36,7 @@ from mtzquant.adapters.shared.context_factory import refresh_context
 from mtzquant.adapters.shared.data_apis import DataApiCore
 from mtzquant.adapters.shared.g_container import GContainer
 from mtzquant.adapters.shared.log_api import make_log
-from mtzquant.adapters.shared.order_apis import make_order_api
+from mtzquant.adapters.shared.order_apis import dedup_target_orders, make_order_api
 from mtzquant.adapters.shared.portfolio_view import UniformPosition, uniform_portfolio
 from mtzquant.core.codes import normalize_code
 from mtzquant.core.errors import MtzQuantError
@@ -144,8 +144,9 @@ class PTradeAdapter:
                 fn(self._ctx)
 
     def take_orders(self) -> list[OrderRequest]:
+        """取出本 bar 全部订单并清空缓冲; target 风格同 code 去重（后者覆盖前者）。"""
         out, self._orders = self._orders, []
-        return out
+        return dedup_target_orders(out)
 
     def sync_orders(self, pairs: list[tuple[OrderRequest, Any]]) -> None:
         """回执 ↔ 引擎订单对齐（id(req) 匹配; 同 bar 撤单在绑定后立即执行, 5.3.1）。"""

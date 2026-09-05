@@ -1,8 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/16 13:00:00
-# @update_time        : 2026/08/16 21:59:08
-# @description : N1-N5 JoinQuantAdapter：注入命名空间/数据族/下单配置族/调度族/detect（4.6）
+# @update_time        : 2026/09/05 11:30:00
+# @description : N1-N5 JoinQuantAdapter：命名空间/数据族/配置族/调度族/detect（4.6）
 
 """JoinQuantAdapter（设计 4.6）——聚宽官方策略零改动回测。
 
@@ -23,6 +23,7 @@ get_all_securities（master 支撑）/ get_trade_days / get_extras（L2 报错+�
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
@@ -32,17 +33,25 @@ from typing import Any
 import pandas as pd
 
 from mtzquant.adapters.joinquant import jq_query
-from mtzquant.adapters.joinquant.jqdata_shim import OrderCost, PriceRelatedSlippage, install_jqdata
+from mtzquant.adapters.joinquant.jqdata_shim import (
+    FixedSlippage,
+    OrderCost,
+    OrderStatus,
+    PerTrade,
+    PriceRelatedSlippage,
+    install_jqdata,
+)
 from mtzquant.adapters.shared.code_style import denormalize_code
 from mtzquant.adapters.shared.context_factory import make_context, refresh_context
 from mtzquant.adapters.shared.data_apis import DataApiCore
 from mtzquant.adapters.shared.g_container import GContainer
 from mtzquant.adapters.shared.log_api import make_log
-from mtzquant.adapters.shared.order_apis import make_order_api
+from mtzquant.adapters.shared.order_apis import dedup_target_orders, make_order_api
 from mtzquant.adapters.shared.portfolio_view import jq_portfolio_view, uniform_portfolio
 from mtzquant.core.codes import normalize_code
 from mtzquant.core.errors import MtzQuantError, NotImplementedApiError
 from mtzquant.engine.orders import OrderRequest
+from mtzquant.engine.orders import OrderStatus as EngineOrderStatus
 
 # 聚宽可调度时刻（日线回测: 盘中时刻折叠 15:00, 4.6 已知近似）
 _JQ_TIMES = {
@@ -61,6 +70,39 @@ _JQ_TIMES = {
     "open",
     "close",
 }
+
+# 聚宽行情字段 → 引擎列（官方字段集见 JoinQuantAPI.md attribute_history:
+# paused/money 均为标准字段; 引擎列为 suspended/amount）
+_FIELD_ALIASES = {"paused": "suspended", "money": "amount"}
+
+# 引擎订单状态 → 聚宽 OrderStatus（官方: held=全部成交, filled=部分成交）
+_ENGINE_TO_JQ_STATUS = {
+    EngineOrderStatus.PENDING: OrderStatus.new,
+    EngineOrderStatus.PARTIALLY_FILLED: OrderStatus.filled,
+    EngineOrderStatus.FILLED: OrderStatus.held,
+    EngineOrderStatus.CANCELLED: OrderStatus.canceled,
+    EngineOrderStatus.EXPIRED: OrderStatus.canceled,
+    EngineOrderStatus.REJECTED: OrderStatus.rejected,
+}
+
+
+def _accepts_data_arg(func: Callable[..., Any]) -> bool:
+    """函数是否接受第二个位置参数（官方 before_trading_start(context) 单参;
+    存量策略/测试有 (context, data) 双参写法——按签名分派, 两种都支持）。"""
+    try:
+        sig = inspect.signature(func)
+    except (TypeError, ValueError):
+        return True  # 不可探测 → 按历史双参行为
+    positional = 0
+    for param in sig.parameters.values():
+        if param.kind is inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if param.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            positional += 1
+    return positional >= 2
 
 
 class JoinQuantAdapter:
@@ -81,10 +123,12 @@ class JoinQuantAdapter:
         self._last_monthly_fire: tuple[int, int] | None = None  # 月折叠每月一次
         self._in_initialize = False
         self.degradations: list[str] = []
+        self._universe_notes: set[str] = set()  # 池外下单扩池降级去重（每标的一次）
+        self._fill_paused_note = False  # get_price(fill_paused=False) 等价提示只记一次
         self.pending_initial_positions: dict[str, tuple[float, float | None]] = {}
         self._initialize: Callable[[Any], None] | None = None
         self._handle_data: Callable[[Any, Any], None] | None = None
-        self._before_trading: Callable[[Any, Any], None] | None = None
+        self._before_trading: Callable[..., Any] | None = None  # 单参/双参签名均兼容
         self._after_trading: Callable[[Any], None] | None = None
         self._process_initialize: Callable[[Any], None] | None = None
         self._ctx = make_context("joinquant")
@@ -120,10 +164,17 @@ class JoinQuantAdapter:
         self._ctx.account = account_view
 
     def on_before_trading(self, ev: Any = None) -> None:
-        """盘前回调（before_trading_start; 当日 bar 不可见, 5.2）。"""
+        """盘前回调（before_trading_start; 当日 bar 不可见, 5.2）。
+
+        官方签名为单参 `before_trading_start(context)`（JoinQuantAPI.md）;
+        存量双参 `(context, data)` 写法按签名兼容——两种都支持。
+        """
         if self._before_trading is not None:
             self._refresh(_self_now(self._ctx))
-            self._before_trading(self._ctx, self._jq_data(include_today=False))
+            if _accepts_data_arg(self._before_trading):
+                self._before_trading(self._ctx, self._jq_data(include_today=False))
+            else:
+                self._before_trading(self._ctx)
 
     def on_bar(self, ev: Any = None) -> None:
         """主驱动（15:00）: 刷新 context → 调度任务 → handle_data（4.6 顺序）。"""
@@ -139,8 +190,9 @@ class JoinQuantAdapter:
             self._after_trading(self._ctx)
 
     def take_orders(self) -> list[OrderRequest]:
+        """取出本 bar 全部订单并清空缓冲; target 风格同 code 去重（后者覆盖前者）。"""
         out, self._orders = self._orders, []
-        return out
+        return dedup_target_orders(out)
 
     def sync_orders(self, pairs: list[tuple[OrderRequest, Any]]) -> None:
         """回执 ↔ 引擎订单对齐（id(req) 匹配; 同 bar 撤单在绑定后执行, 5.3.1）。"""
@@ -186,6 +238,26 @@ class JoinQuantAdapter:
     def _note_degradation(self, note: str) -> None:
         self.degradations.append(note)
         self._emit_event("log", {"kind": "semantic_degradation", "message": note})
+
+    def _ensure_tradable(self, code: str) -> None:
+        """对 universe 外的下单标的动态扩池（每标的首单记一次降级说明）。
+
+        聚宽语义: universe 仅为数据便利（set_universe 注记）, 下单不受池限制;
+        本引擎撮合趟与收盘价刷新按 universe 遍历——扩池后当日收盘即可撮合。
+        """
+        universe_fn = getattr(self._ctx, "universe_fn", None)
+        set_fn = getattr(self._ctx, "set_universe_fn", None)
+        if universe_fn is None or set_fn is None:
+            return
+        cur = universe_fn()
+        if code in cur:
+            return
+        set_fn([*cur, code])
+        if not self._universe_notes:
+            self._note_degradation(
+                "universe 自动扩展: 策略对池外标的下单自动扩池（聚宽语义任意标的可交易）"
+            )
+        self._universe_notes.add(code)
 
     def _refresh(self, dt: datetime) -> None:
         account = getattr(self._ctx, "account", None)
@@ -277,6 +349,12 @@ class JoinQuantAdapter:
             "g": self._g,
             "log": make_log(lambda k, p: self._emit_event(k, p)),
             "data": self._data_view,  # data[security] 快照（策略内动态取）
+            # jq 类（官方全局可直接引用; `from jqdata import *` 亦可, shim 同源注入）
+            "FixedSlippage": FixedSlippage,
+            "PriceRelatedSlippage": PriceRelatedSlippage,
+            "PerTrade": PerTrade,
+            "OrderCost": OrderCost,
+            "OrderStatus": OrderStatus,
         }
         # 下单族（K5 归一; 聚宽签名 order(security, amount), amount 买正卖负）
         order_ns = make_order_api(
@@ -298,6 +376,7 @@ class JoinQuantAdapter:
         ns["get_all_securities"] = self.get_all_securities
         ns["get_trade_days"] = self.get_trade_days
         ns["get_extras"] = self.get_extras
+        ns["get_security_info"] = self.get_security_info
         # M3 基本面族（query DSL, 4.6 附录C）: query/valuation/indicator/finance/get_fundamentals
         ns["query"] = jq_query.query
         ns["valuation"] = jq_query.valuation
@@ -323,8 +402,12 @@ class JoinQuantAdapter:
         """data[security]: 当日快照（handle_data 外访问, 4.6）。"""
         return self._jq_data(include_today=True).get(denormalize_code(security))
 
-    def _make_receipt(self, order_id: str, req: OrderRequest) -> dict[str, Any]:
-        """wrap 工厂: 聚宽 Order 模拟回执（dict, 官方 Order 对象字段子集, 4.6）。"""
+    def _make_receipt(self, order_id: str, req: OrderRequest) -> _JQOrder:
+        """wrap 工厂: 聚宽 Order 模拟回执（官方 Order 对象字段语义, JoinQuantAPI.md Order对象）。
+
+        amount 恒正（官方）; status/filled 为动态属性——未绑定引擎订单时按聚宽
+        回测"下单即成交"可见性口径乐观返回（收盘撮合确定性成交）, 绑定后映射引擎真实状态。
+        """
         style = req.style.value
         if style in ("quantity", "market"):
             raw = req.quantity or 0.0
@@ -334,23 +417,27 @@ class JoinQuantAdapter:
             raw = req.value or 0.0
         else:
             raw = req.target_value or 0.0
-        signed = raw if req.direction.value == "buy" else -raw
-        receipt: dict[str, Any] = {
-            "order_id": order_id,
-            "security": denormalize_code(req.code),
-            "amount": signed,
-            "is_buy": req.direction.value == "buy",
-            "entrust_no": order_id,
-            "status": "open",  # 聚宽 Order.is_filled/is_buy 等, 绑定后转引擎状态
-            "_engine_order": None,
-        }
+        if style in ("value", "target_value"):
+            # 官方 amount 单位是股: value 型订单按当日参考收盘价折算
+            px = self._ref_close(req.code)
+            if px > 0:
+                raw = raw / px
+        receipt = _JQOrder(
+            order_id=order_id,
+            security=denormalize_code(req.code),
+            amount=abs(raw),  # 官方: 下单数量, 不管买/卖都是正数
+            is_buy=req.direction.value == "buy",
+            entrust_no=order_id,
+            status="open",  # 旧字段值（属性访问走动态映射, 见 _JQOrder.status）
+            add_time=req.created_at,
+            _engine_order=None,
+        )
         self._receipts[order_id] = receipt
         self._receipt_by_req[id(req)] = receipt
         # 聚宽同步建仓语义: 挂单即时计入策略持仓视图——买入加列/卖出移除并回款,
         # 使 `len(context.portfolio.positions)` 与 available_cash 在下单循环内实时变化
         # （等分现金策略靠它 break/算槽位; 次日视图重建自愈）。M3-N6。
         # 注意 `order_target(s, 0)` 的 direction 为 buy（0>=0）, 须按 style/target 判定清仓卖。
-        style = req.style.value
         target_zero = (style == "target_quantity" and (req.target_quantity or 0) == 0) or (
             style == "target_value" and (req.target_value or 0) == 0
         )
@@ -359,6 +446,17 @@ class JoinQuantAdapter:
         else:
             self._book_pending_buy(req.code)
         return receipt
+
+    def _ref_close(self, code: str) -> float:
+        """当日参考收盘价（value→股数折算用; 无 bar → 0）。"""
+        provider = getattr(self._ctx, "provider", None)
+        if provider is None:
+            return 0.0
+        try:
+            bar = provider.bar_at(code, _self_now(self._ctx))
+        except Exception:  # noqa: BLE001 - golden 桩 provider 可能无 bar_at
+            return 0.0
+        return float(bar.close) if bar is not None else 0.0
 
     def _book_pending_buy(self, code: str) -> None:
         """把买入挂单计入当前组合视图（仅视图层; 真实账户仍由引擎撮合侧记账）。"""
@@ -502,19 +600,55 @@ class JoinQuantAdapter:
                 transfer_fee_rate=0.0,
             )
 
-    def set_slippage(self, value: float | PriceRelatedSlippage) -> None:
-        """聚宽 set_slippage: 接受 `PriceRelatedSlippage(value)` 或浮点比值。"""
-        if isinstance(value, PriceRelatedSlippage):
-            value = value.value
-        fn = getattr(self._ctx, "set_slippage_fn", None)
-        if fn is not None:
-            fn(ratio=float(value))
+    def set_slippage(
+        self, value: float | FixedSlippage | PriceRelatedSlippage | None = None
+    ) -> None:
+        """聚宽 set_slippage（官方总价差口径, JoinQuantAPI.md set_slippage）。
 
-    def set_commission(self, commission_ratio: float = 0.0003, min_commission: float = 5.0) -> None:
-        """聚宽 set_commission（仅佣金, 4.6 变体）。"""
+        - `FixedSlippage(x)`: 固定价差——成交价 = 均价 ± x/2 → 引擎 fixed=x/2;
+        - `PriceRelatedSlippage(x)`: 百分比价差——成交价 = 均价 × (1 ± x/2) → 引擎 ratio=x/2
+          （注意: x 是**总价差**比例, 买卖各承担一半）;
+        - 裸浮点（mtzQuant 存量用法, 非官方形态）: 直接作单边比例。
+        """
+        fn = getattr(self._ctx, "set_slippage_fn", None)
+        if fn is None:
+            return
+        if isinstance(value, FixedSlippage):
+            fn(ratio=0.0, fixed=value.value / 2.0)
+        elif isinstance(value, PriceRelatedSlippage):
+            fn(ratio=value.value / 2.0, fixed=0.0)
+        elif value is not None:
+            fn(ratio=float(value), fixed=0.0)
+
+    def set_commission(
+        self, commission: PerTrade | float | None = None, min_commission: float = 5.0
+    ) -> None:
+        """聚宽 set_commission（官方已废弃但老策略大量在用; JoinQuantAPI.md set_commission）。
+
+        `PerTrade(buy_cost, sell_cost, min_cost)`: sell_cost 为卖出佣金+印花税合计
+        （官方默认 0.0003/0.0013/5 = 买万3、卖万3+千1印花）→ 映射
+        commission_rate=buy_cost + stamp_tax_rate=sell_cost−buy_cost（卖出侧印花税, 等价）。
+        浮点入参为 mtzQuant 存量用法（直接当佣金率）。
+        """
         fn = getattr(self._ctx, "set_fees_fn", None)
-        if fn is not None:
-            fn(commission_rate=commission_ratio, min_commission=min_commission)
+        if fn is None:
+            return
+        if isinstance(commission, PerTrade):
+            buy, sell = commission.buy_cost, commission.sell_cost
+            if sell < buy:  # 卖出费率低于买入: 印花税映射不了, 差额丢弃并记降级
+                self._note_degradation(
+                    f"set_commission(PerTrade(sell_cost={sell} < buy_cost={buy})): "
+                    "卖出费率低于买入, 差额部分无法映射印花税, 按买入口径生效"
+                )
+            fn(
+                commission_rate=buy,
+                min_commission=commission.min_cost,
+                stamp_tax_rate=max(0.0, sell - buy),
+                transfer_fee_rate=0.0,
+            )
+            return
+        ratio = float(commission) if commission is not None else 0.0003
+        fn(commission_rate=ratio, min_commission=min_commission)
 
     def set_option(self, key: str, value: Any) -> None:
         """聚宽 set_option（L2 子集: 能映射则映射, 否则结构化报错, 4.9）。"""
@@ -554,10 +688,11 @@ class JoinQuantAdapter:
         include_now: bool = False,
         fq: str = "pre",
     ) -> Any:
-        """聚宽 history: 批量 pivot 宽表（多标的多字段, 4.6）。"""
+        """聚宽 history: 批量 pivot 宽表（多标的多字段, 4.6）。字段含 paused/money（别名映射）。"""
         if unit == "1m":
             self._note_degradation("history(unit='1m') 日线回测折叠为 1d（M3 已知近似）")
             unit = "1d"
+        base_field = _FIELD_ALIASES.get(field, field)
         core = self._data_core()
         universe_fn = getattr(self._ctx, "universe_fn", None)
         codes = (
@@ -565,12 +700,26 @@ class JoinQuantAdapter:
             if security_list
             else list(universe_fn() if universe_fn is not None else [])
         )
+        # 官方语义（JoinQuantAPI.md）: history 取日线**不含当前 bar**（include_now=False
+        # 默认）——include_now=False 时把可见窗口拨到前一交易日, 与 attribute_history 一致。
+        as_of_arg: datetime | date | None = None
+        if not include_now:
+            as_of_arg = self._previous_date()
         frames = [
-            core.history(c, count, unit=unit, fields=[field], include_today=include_now)
+            core.history(
+                c,
+                count,
+                unit=unit,
+                fields=[base_field],
+                include_today=include_now,
+                as_of=as_of_arg,
+            )
             for c in codes
         ]
         if len(codes) <= 1:
             frame = frames[0] if frames else pd.DataFrame()
+            if base_field != field and base_field in frame.columns:
+                frame = frame.rename(columns={base_field: field})  # paused/money 还原名
             if not df and field in frame:
                 return frame[field].to_numpy()
             if len(codes) == 1 and field in frame.columns:
@@ -578,7 +727,7 @@ class JoinQuantAdapter:
             return _PosFrame(frame.reset_index(drop=True))
         # 平台码统一: 列=聚宽码（与 get_all_securities/get_current_data/positions 一致）
         out = pd.concat(
-            [f[field].rename(denormalize_code(c)) for f, c in zip(frames, codes, strict=True)],
+            [f[base_field].rename(denormalize_code(c)) for f, c in zip(frames, codes, strict=True)],
             axis=1,
         )
         return _PosFrame(out.reset_index(drop=True))  # 兼容 `df[stock][-1]` 位置访问
@@ -594,9 +743,61 @@ class JoinQuantAdapter:
         include_today: bool = False,
         fq: str = "pre",
     ) -> Any:
-        return self._data_core().attribute_history(
-            normalize_code(security), count, unit=unit, fields=fields, include_today=include_today
-        )
+        """聚宽 attribute_history（官方 JoinQuantAPI.md）: 单标的近 count 根。
+
+        - 字段集含 `paused`/`money`（引擎列 suspended/amount, 输出还原官方名）;
+        - `skip_paused=True`（官方默认）: 剔除停牌/无交易行——为保行数语义,
+          不足 count 时按 2 倍递增回看补取（上限 8×count）;
+        - 返回 `_PosFrame`（兼容旧式 `df['close'][-1]` 位置访问）; `df=False` 返回 ndarray dict。
+        """
+        if unit not in ("1d", "day", "daily"):
+            self._note_degradation(f"attribute_history(unit={unit!r}) 日线回测折叠为 1d")
+        flds = list(fields) if fields else ["open", "close", "high", "low", "volume", "money"]
+        base = [_FIELD_ALIASES.get(f, f) for f in flds]
+        code = normalize_code(security)
+        core = self._data_core()
+        fetch_fields = list(dict.fromkeys([*base, "suspended"])) if skip_paused else base
+        n_fetch = count
+        # 官方语义（JoinQuantAPI.md）: attribute_history 取日线**不含当前 bar**,
+        # 即使在 15:00/after_close 也如此——故 include_today=False 时把可见窗口
+        # 拨到前一交易日（引擎 provider 的 include_today=False 是"盘后当日可见",
+        # 直接透传会让 15:00 折叠执行时吸入当日 bar, 选股/回看语义错位）。
+        as_of_arg: datetime | date | None = None
+        if not include_today:
+            as_of_arg = self._previous_date()
+        frame = pd.DataFrame()
+        for _ in range(4):  # 2/4/8 倍回看, 停牌剔除后仍保证 count 行
+            fr = core.history(
+                code,
+                n_fetch,
+                unit="1d",
+                fields=fetch_fields,
+                include_today=include_today,
+                as_of=as_of_arg,
+            )
+            if fr is None or fr.empty:
+                frame = fr if fr is not None else pd.DataFrame()
+                break
+            if not skip_paused or "suspended" not in fr.columns:
+                frame = fr
+                break
+            kept = fr[fr["suspended"] == 0]
+            if len(kept) >= count or len(fr) < n_fetch:  # 够数 或 已取尽全部历史
+                frame = kept
+                break
+            n_fetch *= 2
+        else:
+            frame = frame if isinstance(frame, pd.DataFrame) and not frame.empty else kept
+        if frame is None or frame.empty:
+            return pd.DataFrame(columns=flds) if df else {f: [] for f in flds}
+        back = {v: k for k, v in _FIELD_ALIASES.items() if k in set(flds)}
+        if back:
+            frame = frame.rename(columns=back)
+        keep = [f for f in flds if f in frame.columns]
+        frame = frame[keep]
+        if not df:
+            return {f: frame[f].to_numpy() for f in keep}
+        return _PosFrame(frame)
 
     _VIRTUAL_FIELDS = {"high_limit", "low_limit", "limit_up", "limit_down"}
 
@@ -612,23 +813,36 @@ class JoinQuantAdapter:
         count: int | None = None,
         panel: bool = True,
         include_now: bool = True,
+        fill_paused: bool | None = None,
+        **kw: Any,
     ) -> Any:
         """聚宽 get_price: 单/多标的, panel True/False, 虚拟字段 high_limit/low_limit（M3）。
 
         - 多标的 panel=True → {field: DataFrame(dt × codes)};
         - 多标的 panel=False → 每标的一行（末根）, 列 = [code] + fields
           （策略 get_zt_stock_list 用法）;
-        - 单标的 → DataFrame(dt × fields)。
+        - 单标的 → DataFrame(dt × fields);
+        - 字段集含 `paused`/`money`（别名映射, 输出还原官方名）;
+        - `fill_paused`（新版聚宽参数）宽容接收: 本地停牌行为原始数据行
+          （无填充语义）, 与 fill_paused=False 天然等价;
+        - 其余未知聚宽参数宽容忽略并记降级。
         涨跌停价（high_limit/low_limit）为虚拟字段: 本地 bar 无 limit 列,
           由 pre_close×板块因子计算。
         """
+        if kw:
+            self._note_degradation(f"get_price 忽略不支持的参数: {sorted(kw)}（日线回测近似）")
+        if fill_paused is not None and not fill_paused and not self._fill_paused_note:
+            self._fill_paused_note = True
+            self._note_degradation("get_price(fill_paused=False): 本地停牌行即原始数据, 语义已等价")
         is_list = isinstance(security, (list, tuple))
         codes = [normalize_code(c) for c in (security if is_list else [security])]  # type: ignore[arg-type]
         flds = list(fields) if fields else ["open", "close", "high", "low", "volume", "money"]
         want_limits = any(f in self._VIRTUAL_FIELDS for f in flds)
-        base_fields = [f for f in flds if f not in self._VIRTUAL_FIELDS]
+        base_fields = [_FIELD_ALIASES.get(f, f) for f in flds if f not in self._VIRTUAL_FIELDS]
         if want_limits:
             base_fields = list(dict.fromkeys([*base_fields, "pre_close"]))
+        # 输出还原名: 仅还原请求了的别名（避免覆盖用户显式请求的引擎列名）
+        back_rename = {v: k for k, v in _FIELD_ALIASES.items() if k in set(flds)}
         if not codes:
             # 空列表输入: 返回带预期列的窄表（对齐聚宽 get_price([]) 语义）
             if is_list and not security:
@@ -647,6 +861,8 @@ class JoinQuantAdapter:
                 unit="1d",
                 fields=base_fields,
             )
+            if fr is not None and not fr.empty:
+                fr = fr.rename(columns=back_rename)
             if want_limits and fr is not None and not fr.empty and "pre_close" in fr.columns:
                 up, dn = self._limit_prices_series(c, fr["pre_close"])
                 fr = fr.copy()
@@ -741,17 +957,9 @@ class JoinQuantAdapter:
         """
         want = set(types) if isinstance(types, (list, tuple)) else ({types} if types else {"stock"})
         asof = _to_date(date) or self._previous_date()
-        df = self._master_df()
+        sub = self._pit_master(want, asof)
         out: list[dict[str, Any]] = []
-        for _, r in df.iterrows():
-            if r["instrument_type"] not in want:
-                continue
-            listed = _parse_yyyymmdd(r.get("list_date"))
-            delisted = _parse_yyyymmdd(r.get("delist_date"))
-            if listed is not None and listed > asof:
-                continue
-            if delisted is not None and delisted <= asof:
-                continue
+        for _, r in sub.iterrows():
             # 平台码统一: 输出聚宽码（600000.XSHG）, 与 get_current_data/positions/history 一致
             code = denormalize_code(normalize_code(r["code"]))
             name = r.get("name") or ""
@@ -760,8 +968,8 @@ class JoinQuantAdapter:
                     "code": code,
                     "display_name": name or code,
                     "name": name,
-                    "start_date": r.get("list_date") or "",
-                    "end_date": r.get("delist_date") or "",
+                    "start_date": _norm_iso_date(str(r.get("list_date") or "")),
+                    "end_date": _norm_iso_date(str(r.get("delist_date") or "")),
                 }
             )
         if not out:
@@ -772,10 +980,18 @@ class JoinQuantAdapter:
     # M3 基本面族（query DSL, 4.6 附录C / 3.13）
     # ------------------------------------------------------------------
     def get_fundamentals(self, query_obj: Any, date: str | date | None = None) -> Any:
-        """聚宽 get_fundamentals(query, date=None): 求值 query → DataFrame（PIT as_of=date）。"""
+        """聚宽 get_fundamentals(query, date=None): 求值 query → DataFrame（PIT as_of=date）。
+
+        官方语义: query 不带 `code.in_(...)` 过滤时查询**全市场股票**
+        （JoinQuantAPI.md get_fundamentals）——缺省池取主数据 PIT 存续股票
+        （list_date<=asof 且未退市）, 而非 context.universe。
+        """
         asof = _to_date(date) or self._previous_date()
+        pool = jq_query._collect_codes(query_obj)
+        if pool is None:
+            pool = self._pit_stocks(asof)
         try:
-            return jq_query.eval_query(self._ctx, query_obj, asof)
+            return jq_query.eval_query(self._ctx, query_obj, asof, default_pool=pool)
         finally:
             self._maybe_trim_fund_cache()
 
@@ -823,6 +1039,51 @@ class JoinQuantAdapter:
                     columns=["code", "name", "instrument_type", "list_date", "delist_date"]
                 )
         return self._master_frame
+
+    def _pit_master(self, types: set[str], asof: date) -> pd.DataFrame:
+        """主数据 PIT 过滤（向量化, 热路径: 全市场基本面池每交易日调用一次）。"""
+        df = self._master_df()
+        if df.empty or "instrument_type" not in df.columns:
+            return df
+        sub = df[df["instrument_type"].isin(types)]
+        listed = sub["list_date"].map(_yyyymmdd_int)
+        delisted = sub["delist_date"].map(_yyyymmdd_int)
+        cutoff = asof.year * 10000 + asof.month * 100 + asof.day
+        ok_list = listed.isna() | (listed <= cutoff)  # 未上市晚于查询日 → 排除
+        ok_delist = delisted.isna() | (delisted > cutoff)  # 已退市 → 排除
+        return sub[ok_list & ok_delist]
+
+    def _pit_stocks(self, asof: date) -> list[str]:
+        """asof 时点存续的全部股票（归一码, 官方全市场基本面池语义）。"""
+        sub = self._pit_master({"stock"}, asof)
+        if sub.empty:
+            return []
+        return sorted({normalize_code(c) for c in sub["code"]})
+
+    def get_security_info(self, code: str) -> SimpleNamespace | None:
+        """聚宽 get_security_info（JoinQuantAPI.md）: display_name/name/start_date/end_date/type。
+
+        本地主数据无拼音缩写, `name` 以中文名代用（与 display_name 同值, 记近似）;
+        end_date 缺失按官方惯例 2200-01-01。
+        """
+        c = normalize_code(code)
+        df = self._master_df()
+        if df.empty:
+            return None
+        hit = df[df["code"].map(normalize_code) == c]
+        if hit.empty:
+            return None
+        r = hit.iloc[0]
+        name = str(r.get("name") or "")
+        end = str(r.get("delist_date") or "").strip()
+        return SimpleNamespace(
+            code=denormalize_code(c),
+            display_name=name or code,
+            name=name,  # 官方为拼音缩写; 本地无此数据, 以中文名代用
+            start_date=str(r.get("list_date") or "").strip() or "1990-01-01",
+            end_date=_norm_iso_date(end) or "2200-01-01",
+            type=str(r.get("instrument_type") or "stock").strip() or "stock",
+        )
 
     def _name_map(self) -> dict[str, str]:
         if self._names is None:
@@ -887,7 +1148,24 @@ class JoinQuantAdapter:
 class _ViewPositions(dict[str, Any]):
     """聚宽持仓视图字典: 迭代/keys/items/values 返回快照——策略循环内下卖单即时移除
     持仓时不触发 "dictionary changed size during iteration"（同步建仓语义, M3-N6）。
-    `len()` 仍实时反映移除后的持仓数（等分现金策略算槽位用）。"""
+    `len()` 仍实时反映移除后的持仓数（等分现金策略算槽位用）。
+
+    官方语义（聚宽常见写法 `context.portfolio.positions[s].total_amount > 0`）:
+    访问未持仓代码返回**空 Position**（不入库——不污染 len/迭代/keys）。
+    """
+
+    def __missing__(self, key: str) -> Any:
+        return SimpleNamespace(
+            security=key,
+            amount=0.0,
+            total_amount=0.0,
+            closeable_amount=0.0,
+            avg_cost=0.0,
+            price=0.0,
+            value=0.0,
+            sid=key,
+            last_price=0.0,
+        )
 
     def __iter__(self) -> Any:
         return iter(list(super().__iter__()))
@@ -900,6 +1178,69 @@ class _ViewPositions(dict[str, Any]):
 
     def values(self) -> Any:  # type: ignore[override]
         return list(super().values())
+
+
+class _JQOrder(dict[str, Any]):
+    """聚宽 Order 模拟回执: dict 访问兼容 + 官方 Order 属性（JoinQuantAPI.md Order对象）。
+
+    - `amount`/`filled`: 官方语义**恒为正数**;
+    - `status`: OrderStatus 动态映射——引擎订单已绑定时映射真实状态
+      （FILLED→held 全部成交 / PARTIAL→filled 部分成交 / REJECTED→rejected / …）;
+      未绑定时（策略下单后同步检查, 引擎尚未 take_orders）按聚宽回测
+      "市价单下单即成交"的可见口径乐观返回 held/filled=amount;
+    - `price`/`avg_cost`: 绑定后取引擎平均成交价。
+    """
+
+    _DYNAMIC_KEYS = frozenset({"status", "filled", "is_filled", "price", "avg_cost"})
+
+    def __getattr__(self, name: str) -> Any:
+        """属性访问兜底: order_id/security/amount/is_buy/add_time 等官方字段走 dict 键。"""
+        try:
+            return dict.__getitem__(self, name)
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def __getitem__(self, key: str) -> Any:
+        if key in self._DYNAMIC_KEYS:
+            return getattr(self, key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:  # type: ignore[override]
+        if key in self._DYNAMIC_KEYS:
+            return getattr(self, key)
+        return super().get(key, default)
+
+    @property
+    def filled(self) -> float:
+        eo = dict.get(self, "_engine_order")
+        if eo is not None:  # 已绑定引擎订单 → 诚实反映（可能 0=未成交）
+            return float(getattr(eo, "filled_qty", 0.0))
+        # 未绑定（策略下单后同步检查, 引擎尚未受理）→ 聚宽"下单即成交"可见口径
+        return float(dict.get(self, "amount", 0.0))
+
+    @property
+    def status(self) -> OrderStatus:
+        eo = dict.get(self, "_engine_order")
+        if eo is None:
+            return OrderStatus.held
+        st = getattr(eo, "status", None)
+        if st is None:
+            return OrderStatus.open
+        return _ENGINE_TO_JQ_STATUS.get(st, OrderStatus.open)
+
+    @property
+    def is_filled(self) -> bool:
+        return self.status is OrderStatus.held
+
+    @property
+    def price(self) -> float:
+        eo = dict.get(self, "_engine_order")
+        p = getattr(eo, "avg_fill_price", None) if eo is not None else None
+        return float(p) if p else 0.0
+
+    @property
+    def avg_cost(self) -> float:
+        return self.price
 
 
 class _PosSeries(pd.Series):
@@ -922,7 +1263,12 @@ class _PosFrame(pd.DataFrame):
 
 
 class _CurrentDataDict(dict[str, Any]):
-    """get_current_data 返回: 缺失标的自动补暂停快照（无行情→视为停牌, M3）。"""
+    """get_current_data 返回: 官方**按需惰性取数**（JoinQuantAPI.md get_current_data:
+    dict 初始为空, `current_data[security]` 时才获取该标的数据）。
+
+    缺失标的 → 真实拉取当日 bar 快照（任意本地有行情的代码均可见）;
+    无行情/无数据 → 停牌快照（paused=True, 对齐官方"停牌/未上市/退市返回 True"）。
+    """
 
     def __init__(self, adapter: JoinQuantAdapter, snapshots: dict[str, Any], now: datetime) -> None:
         super().__init__(snapshots)
@@ -932,9 +1278,11 @@ class _CurrentDataDict(dict[str, Any]):
     def __missing__(self, key: str) -> Any:
         code = normalize_code(key)
         sec = denormalize_code(code)
-        name = self._adapter._name_map().get(code, "")
-        is_st = bool(name and ("ST" in name or "*" in name or "退" in name))
-        snap = _jq_snapshot(sec, self._now, paused=True, name=name, is_st=is_st)
+        snap = self._adapter._jq_data(include_today=True, codes=[code]).get(sec)
+        if snap is None:  # 兜底（_jq_data 内部已处理无 bar→paused, 此处防御）
+            name = self._adapter._name_map().get(code, "")
+            is_st = bool(name and ("ST" in name or "*" in name or "退" in name))
+            snap = _jq_snapshot(sec, self._now, paused=True, name=name, is_st=is_st)
         self[key] = snap
         return snap
 
@@ -947,6 +1295,9 @@ class _InnerGateway:
         self._adapter._receipt_seq += 1
         oid = f"jq{self._adapter._receipt_seq}"
         self._adapter._orders.append(req)
+        # 聚宽语义: universe 只是数据便利, 任意本地有行情的标的均可下单——
+        # 引擎撮合趟/收盘价刷新按 universe 遍历, 故对池外标的动态扩池
+        self._adapter._ensure_tradable(req.code)
         return oid
 
 
@@ -966,13 +1317,14 @@ def _jq_snapshot(
     is_st: bool = False,
     paused: bool = False,
 ) -> SimpleNamespace:
-    """聚宽 data[security] / CurrentData 快照（字段子集, 4.6;
-    M3 增补 pre_close/涨跌停/名称/ST）。"""
+    """聚宽 data[security] / CurrentData 快照（字段对齐官方 get_current_data, JoinQuantAPI.md:
+    last_price/high_limit/low_limit/paused/is_st/day_open/name; M3 增补 pre_close 等）。"""
     return SimpleNamespace(
         code=security,
         security=security,
         day=dt.date(),
         open=open,
+        day_open=open,  # 官方 CurrentData.day_open: 当天开盘价
         high=high,
         low=low,
         close=close,
@@ -1025,6 +1377,25 @@ def _parse_yyyymmdd(value: Any) -> date | None:
             return date.fromisoformat(text)
         except ValueError:
             return None
+
+
+def _yyyymmdd_int(value: Any) -> int | None:
+    """YYYYMMDD(含 - 分隔)/空 → int（YYYYMMDD, 供向量化日期比较）; 非法 → None。"""
+    if value is None:
+        return None
+    text = str(value).strip().split(".")[0].replace("-", "")
+    if not text or text.lower() in ("nan", "none"):
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _norm_iso_date(value: str) -> str:
+    """主数据日期串 → ISO（YYYYMMDD 转 YYYY-MM-DD; 空/非法 → ""）。"""
+    d = _parse_yyyymmdd(value)
+    return d.isoformat() if d is not None else ""
 
 
 def _register() -> None:

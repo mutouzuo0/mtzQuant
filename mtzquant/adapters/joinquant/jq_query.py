@@ -1,9 +1,8 @@
 # coding:utf-8
 # @author      : 木头左
 # @create_time        : 2026/08/17 10:40:00
-# @update_time        : 2026/08/17 10:40:00
-# @description : M3 聚宽 query DSL：query/filter/order_by +
-#   valuation/indicator/finance.STK_XR_XD 求值（PIT）
+# @update_time        : 2026/09/05 11:30:00
+# @description : M3 聚宽 query DSL：query/filter/order_by/limit + 三表求值（PIT + latest 快路径）
 
 """聚宽 query DSL（M3, 设计 4.6/3.13）——`get_fundamentals` / `finance.run_query` 的求值引擎。
 
@@ -157,6 +156,7 @@ class Query:
         self.fields = list(fields)
         self.conds: list[Cond] = []
         self.order: list[OrderSpec] = []
+        self.limit_n: int | None = None
 
     def filter(self, *conds: Cond) -> Query:
         self.conds.extend(conds)
@@ -164,6 +164,11 @@ class Query:
 
     def order_by(self, *specs: OrderSpec) -> Query:
         self.order.extend(specs)
+        return self
+
+    def limit(self, n: int) -> Query:
+        """限制返回行数（官方: 与 order_by 配合取排序后前 n 行, 见 JoinQuantAPI.md）。"""
+        self.limit_n = max(0, int(n))
         return self
 
 
@@ -282,6 +287,26 @@ def _read_row(
         return None
 
 
+def _latest_fields(
+    ctx: Any, code: str, local_table: str, source_cols: list[str], as_of: datetime
+) -> dict[str, float | None] | None:
+    """latest 快路径: provider.fundamentals_latest 直接取 as_of 最新可见行字段值。
+
+    全市场池（数千 code × 每交易日）下 frame 逐行拷贝是热点; store 侧用
+    预解析缓存 + searchsorted 免建 DataFrame。provider 未提供时返回 None（调用方退回 frame 路径）。
+    """
+    provider = getattr(ctx, "provider", None)
+    if provider is None:
+        return None
+    fn = getattr(provider, "fundamentals_latest", None)
+    if fn is None:
+        return None
+    try:
+        return fn(code, local_table, source_cols, as_of=as_of, knowledge_time=as_of)
+    except Exception:  # noqa: BLE001 - 缺数据/缺披露日 → 该 code 无该表值
+        return None
+
+
 def _latest_value(frame: pd.DataFrame | None, source_col: str, scale: float) -> float | None:
     """取 as_of 最新一行的列值（valuation/indicator 语义: 最新披露/最新交易日）。"""
     if frame is None or frame.empty or source_col not in frame.columns:
@@ -295,17 +320,30 @@ def _latest_value(frame: pd.DataFrame | None, source_col: str, scale: float) -> 
 def _row_values(
     ctx: Any, code: str, local_table: str, as_of: datetime
 ) -> dict[str, float | str | None]:
-    """valuation/indicator: 每 jq 字段的 as_of 最新值（行键按 jq 字段名）。"""
+    """valuation/indicator: 每 jq 字段的 as_of 最新值（行键按 jq 字段名）。
+
+    code 键恒有值（缺数据行也保留 code, 数值列 None → NaN——对齐聚宽
+    "无数据行过滤/NaN 排序垫底"语义, 全市场池下缺 daily_basic 的股票不炸查询）。
+    """
     key = _key_of(local_table)
     fields = _TABLES[key]
     source_cols = sorted({f[0] if isinstance(f, tuple) else f for f in fields.values()})
-    frame = _read_row(ctx, code, local_table, source_cols, as_of)
-    out: dict[str, float | str | None] = {"__code__": code}
-    if frame is None or frame.empty:
+    out: dict[str, float | str | None] = {"__code__": code, "code": code}
+    # latest 快路径（全市场池热点）: 直接取字段值, 免建 DataFrame
+    values = _latest_fields(ctx, code, local_table, source_cols, as_of)
+    if values is not None:
+        for jq_field, fspec in fields.items():
+            if jq_field == "code":
+                continue
+            src, scale = fspec if isinstance(fspec, tuple) else (fspec, 1.0)
+            v = values.get(src)
+            out[jq_field] = None if v is None else float(v) * scale
         return out
+    frame = _read_row(ctx, code, local_table, source_cols, as_of)
+    if frame is None or frame.empty:
+        return out  # code 已带; 数值列缺 → None（NaN）
     for jq_field, fspec in fields.items():
         if jq_field == "code":
-            out[jq_field] = code
             continue
         src, scale = fspec if isinstance(fspec, tuple) else (fspec, 1.0)
         out[jq_field] = _latest_value(frame, src, scale)
@@ -393,11 +431,20 @@ def _project(row: dict[str, Any], field: Any, as_of: datetime) -> Any:
     return field
 
 
-def eval_query(ctx: Any, q: Query, as_of: date | datetime) -> pd.DataFrame:
-    """求值 query → jq 语义 DataFrame（列=请求字段名; code 列归一码）。"""
+def eval_query(
+    ctx: Any, q: Query, as_of: date | datetime, *, default_pool: list[str] | None = None
+) -> pd.DataFrame:
+    """求值 query → jq 语义 DataFrame（列=请求字段名; code 列归一码）。
+
+    查询池优先级: `code.in_(...)` 条件 > `default_pool`（适配器注入, 如主数据 PIT 全市场
+    ——官方语义: 不带 code 过滤即全市场股票） > context.universe。
+    `q.limit` 在排序后截断（官方 order_by+limit 语义）。
+    """
     asof = _asof(as_of)
     tables = _tables_of(q)
     codes = _collect_codes(q)
+    if codes is None and default_pool:
+        codes = list(default_pool)
     if codes is None:
         universe_fn = getattr(ctx, "universe_fn", None)
         codes = list(universe_fn()) if universe_fn is not None else []
@@ -455,11 +502,13 @@ def eval_query(ctx: Any, q: Query, as_of: date | datetime) -> pd.DataFrame:
     if "code" in df.columns:
         df["code"] = [denormalize_code(c) for c in df["code"]]
 
-    # 排序
+    # 排序 + limit 截断（官方: order_by 后取前 n 行）
     for spec in reversed(q.order):
         col = spec.column.field
         if col in df.columns:
             df = df.sort_values(col, ascending=(spec.direction == "asc"), kind="stable")
+    if q.limit_n is not None:
+        df = df.head(q.limit_n)
     return df.reset_index(drop=True)
 
 
